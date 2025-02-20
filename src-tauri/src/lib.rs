@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 
 use tauri::State;
 
-use crate::funcs::task::Log;
+use crate::funcs::client;
 use crate::funcs::utils;
 use crate::target::exchange::{get_rest_instruments, get_rest_ticker_info, ExchangeName};
 
@@ -17,11 +17,11 @@ mod funcs;
 mod target;
 
 struct AppState {
-    controller: funcs::task::Controller,
+    controller: client::Controller,
 
     workers: Option<Workers>,
 
-    logger: Option<Arc<RwLock<funcs::task::Logger>>>,
+    logger: Option<Arc<RwLock<client::Logger>>>,
 }
 
 struct Workers {
@@ -67,7 +67,7 @@ impl Workers {
 #[tauri::command]
 async fn start_controller(
     state: State<'_, Arc<RwLock<AppState>>>,
-) -> Result<funcs::task::Controller, Value> {
+) -> Result<client::Controller, Value> {
     let (cloned_controller, cloned_logger) = {
         let mut w = state.write().await;
         match w.controller.ok() {
@@ -87,12 +87,12 @@ async fn start_controller(
             w.workers = None;
         }
 
-        let set_log = Some(Log {
+        let set_log = Some(client::Log {
             level: "info".to_string(),
             message: "start_controller".to_string(),
             timestamp: chrono::Local::now().to_rfc3339(),
         });
-        let logger = Arc::new(RwLock::new(funcs::task::Logger::new(set_log.clone())));
+        let logger = Arc::new(RwLock::new(client::Logger::new(set_log.clone())));
         w.logger = Some(logger.clone());
 
         (Arc::new(RwLock::new(w.controller.clone())), logger.clone())
@@ -120,7 +120,7 @@ async fn start_controller(
 #[tauri::command]
 async fn stop_controller(
     state: State<'_, Arc<RwLock<AppState>>>,
-) -> Result<funcs::task::Controller, Value> {
+) -> Result<client::Controller, Value> {
     // workers
     let (mut controller, mut workers) = {
         let mut w = state.write().await;
@@ -156,7 +156,7 @@ async fn post_controller(
     value: Value,
 ) -> Result<Value, Value> {
     // value bind to Controller
-    let controller: funcs::task::Controller = match serde_json::from_value(value.clone()) {
+    let controller: client::Controller = match serde_json::from_value(value.clone()) {
         Ok(v) => v,
         Err(e) => {
             return Err(utils::err_response_handler(
@@ -200,7 +200,7 @@ async fn put_controller(
     value: Value,
 ) -> Result<Value, Value> {
     // value bind to Controller
-    let controller: funcs::task::Controller = serde_json::from_value(value).unwrap();
+    let controller: client::Controller = serde_json::from_value(value).unwrap();
     debug!("put data: {:?}", controller);
 
     {
@@ -214,8 +214,8 @@ async fn put_controller(
 #[tauri::command]
 async fn delete_controller(
     state: State<'_, Arc<RwLock<AppState>>>,
-) -> Result<funcs::task::Controller, Value> {
-    let controller = funcs::task::Controller::default();
+) -> Result<client::Controller, Value> {
+    let controller = client::Controller::default();
     let mut w = state.write().await;
     w.controller = controller.clone();
 
@@ -269,7 +269,7 @@ async fn get_logger(state: State<'_, Arc<RwLock<AppState>>>) -> Result<Value, Va
 
             Ok(json!(send_logger.log))
         }
-        None => Err(json!(funcs::task::Logger::new(None))),
+        None => Err(json!(funcs::client::Logger::new(None))),
     }
 }
 
@@ -286,7 +286,7 @@ pub fn run() {
     utils::init_logger("output.log");
 
     let use_state = Arc::new(RwLock::new(AppState {
-        controller: funcs::task::Controller::default(),
+        controller: client::Controller::default(),
         workers: None,
         logger: None,
     }));
