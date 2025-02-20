@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use tauri::State;
 
 use crate::funcs::task::Log;
-use crate::target::exchange::ExchangeName;
+use crate::target::exchange::{get_rest_instruments, get_rest_ticker_info, ExchangeName};
 
 mod board;
 mod funcs;
@@ -104,11 +104,13 @@ async fn start_controller(
     // worker
     let mut workers = Workers::new();
     workers.extend(handles);
+    let workers = workers;
 
-    let mut w = state.write().await;
-    w.workers = Some(workers);
-    let mut controller = w.controller.clone();
-    drop(w);
+    let mut controller = {
+        let mut w = state.write().await;
+        w.workers = Some(workers);
+        w.controller.clone()
+    };
 
     controller.is_running = true;
     Ok(controller)
@@ -119,19 +121,20 @@ async fn stop_controller(
     state: State<'_, Arc<RwLock<AppState>>>,
 ) -> Result<funcs::task::Controller, Value> {
     // workers
-    let mut w = state.write().await;
-    let mut workers = match w.workers.take() {
-        Some(v) => v,
-        None => {
-            return Err(err_response_handler(
-                "workers is not found, please ",
-                "runner is not running, please start runner",
-            ));
-        }
+    let (mut controller, mut workers) = {
+        let mut w = state.write().await;
+        let workers = match w.workers.take() {
+            Some(v) => v,
+            None => {
+                return Err(err_response_handler(
+                    "workers is not found, please ",
+                    "runner is not running, please start runner",
+                ));
+            }
+        };
+        w.workers = None;
+        (w.controller.clone(), workers)
     };
-    w.workers = None;
-    let mut controller = w.controller.clone();
-    drop(w);
 
     // abort all workers
     match workers.abort_all().await {
@@ -154,7 +157,7 @@ async fn stop_controller(
 async fn post_controller(
     state: State<'_, Arc<RwLock<AppState>>>,
     value: Value,
-) -> Result<funcs::task::Controller, Value> {
+) -> Result<Value, Value> {
     // value bind to Controller
     let controller: funcs::task::Controller = match serde_json::from_value(value.clone()) {
         Ok(v) => v,
@@ -176,16 +179,20 @@ async fn post_controller(
         }
     }
 
-    let mut w = state.write().await;
-    w.controller = controller.clone();
+    {
+        let mut w = state.write().await;
+        w.controller = controller.clone();
+    }
 
-    Ok(controller)
+    Ok(json!(controller))
 }
 
 #[tauri::command(rename_all = "snake_case")]
 async fn get_controller(state: State<'_, Arc<RwLock<AppState>>>) -> Result<Value, Value> {
-    let r = state.read().await;
-    let controller = r.controller.clone();
+    let controller = {
+        let r = state.read().await;
+        r.controller.clone()
+    };
 
     Ok(json!(controller))
 }
@@ -194,15 +201,17 @@ async fn get_controller(state: State<'_, Arc<RwLock<AppState>>>) -> Result<Value
 async fn put_controller(
     state: State<'_, Arc<RwLock<AppState>>>,
     value: Value,
-) -> Result<funcs::task::Controller, Value> {
+) -> Result<Value, Value> {
     // value bind to Controller
     let controller: funcs::task::Controller = serde_json::from_value(value).unwrap();
     trace!("{:?}", controller);
 
-    let mut w = state.write().await;
-    w.controller = controller.clone();
+    {
+        let mut w = state.write().await;
+        w.controller = controller.clone();
+    }
 
-    Ok(controller)
+    Ok(json!(controller))
 }
 
 #[tauri::command]
@@ -217,44 +226,23 @@ async fn delete_controller(
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn get_instruments(
-    exchange_name: String,
-    state: State<'_, Arc<RwLock<AppState>>>,
-) -> Result<Value, Value> {
-    let r = state.read().await;
-
-    let instruments: Vec<target::exchanges::models::Instrument> =
-        match r.controller.exchange.instruments().await {
-            Ok(v) => v,
-            Err(e) => {
-                return Err(err_response_handler(
-                    "instruments is not found",
-                    &e.to_string(),
-                ))
-            }
-        };
+async fn get_instruments(exchange_name: ExchangeName) -> Result<Value, Value> {
+    let instruments = match get_rest_instruments(exchange_name.clone()).await {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(err_response_handler(
+                "instruments is not found",
+                &e.to_string(),
+            ))
+        }
+    };
 
     Ok(json!(instruments))
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn get_ticker(
-    mut exchange_name: String,
-    symbol: String,
-    state: State<'_, Arc<RwLock<AppState>>>,
-) -> Result<Value, Value> {
-    let r = state.read().await;
-
-    if exchange_name.is_empty() {
-        exchange_name = r.controller.exchange.name.as_str().to_string();
-    }
-
-    let ticker: target::exchanges::models::Ticker = match r
-        .controller
-        .exchange
-        .ticker_info(ExchangeName::from(exchange_name), symbol.clone())
-        .await
-    {
+async fn get_ticker(exchange_name: ExchangeName, symbol: String) -> Result<Value, Value> {
+    let ticker = match get_rest_ticker_info(exchange_name.clone(), symbol.clone()).await {
         Ok(v) => v,
         Err(e) => return Err(err_response_handler("ticker is not found", &e.to_string())),
     };
@@ -264,16 +252,18 @@ async fn get_ticker(
 
 #[tauri::command]
 async fn get_logger(state: State<'_, Arc<RwLock<AppState>>>) -> Result<Value, Value> {
-    let logger = {
-        let r = state.write().await;
+    let read_logger = {
+        let r = state.read().await;
         r.logger.clone()
     };
 
-    match logger {
-        Some(logger_arc) => {
-            let mut guarded_logger = logger_arc.write().await;
-            let send_logger = guarded_logger.clone();
-            guarded_logger.clear();
+    match read_logger {
+        Some(origin_logger) => {
+            let mut w_logger = origin_logger.write().await;
+            let send_logger = w_logger.clone();
+            w_logger.clear();
+            let mut w = state.write().await;
+            w.logger = Some(origin_logger.clone());
 
             Ok(json!(send_logger.log))
         }
