@@ -205,7 +205,7 @@ impl Config {
 
         let handle = match exchange {
             ExchangeName::Bybit => {
-                let category = "linear".to_string();
+                let category = self.category.clone().unwrap_or("spot".to_string());
                 let symbol = symbol.clone();
                 let key = self.key.clone();
                 let secret = self.secret.clone();
