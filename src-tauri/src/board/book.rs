@@ -93,16 +93,15 @@ impl Orderboard {
     }
 
     pub fn extend_ask(&mut self, ask: Vec<Book>) -> DateTime<Utc> {
-        let mut abook = self.ask.write().unwrap();
-
-        abook.clear();
-
+        let mut new_book = BTreeMap::new();
         for book in ask {
-            if book.is_remove() {
-                abook.remove(&OrderedFloat(book.price));
-                continue;
-            }
-            abook.insert(OrderedFloat(book.price), book);
+            new_book.insert(OrderedFloat(book.price), book);
+        }
+
+        {
+            let mut w = self.bid.write().unwrap();
+            w.clear();
+            *w = new_book;
         }
 
         self.update_at = Utc::now();
@@ -110,17 +109,15 @@ impl Orderboard {
     }
 
     pub fn extend_bid(&mut self, bid: Vec<Book>) -> DateTime<Utc> {
-        let mut bbook = self.bid.write().unwrap();
-
-        bbook.clear();
-
+        let mut new_book = BTreeMap::new();
         for book in bid {
-            if book.is_remove() {
-                bbook.remove(&OrderedFloat(book.price));
-                continue;
-            }
+            new_book.insert(OrderedFloat(book.price), book);
+        }
 
-            bbook.insert(OrderedFloat(book.price), book);
+        {
+            let mut w = self.bid.write().unwrap();
+            w.clear();
+            *w = new_book;
         }
 
         self.update_at = Utc::now();
