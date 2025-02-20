@@ -1,4 +1,4 @@
-use log::trace;
+use log::{error, trace};
 use std::env;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -70,7 +70,10 @@ async fn start_controller(
     let (cloned_controller, cloned_logger) = {
         let mut w = state.write().await;
         if !w.controller.is_ok() {
-            return Err(json!({"error": "controller is not ok"}));
+            return Err(err_response_handler(
+                "controller is not ok, please check value",
+                json!(w.controller).as_str().unwrap(),
+            ));
         }
 
         // すでに実行してるWorkerがあれば停止
@@ -116,7 +119,12 @@ async fn stop_controller(
     let mut w = state.write().await;
     let mut workers = match w.workers.take() {
         Some(v) => v,
-        None => return Err(json!({"error": "workers is not found"})),
+        None => {
+            return Err(err_response_handler(
+                "workers is not found, please ",
+                "runner is not running, please start runner",
+            ));
+        }
     };
     w.workers = None;
     let mut controller = w.controller.clone();
@@ -130,8 +138,11 @@ async fn stop_controller(
             Ok(controller)
         }
         Err(e) => {
-            trace!("error: {:?}", e);
-            Err(json!(e.to_string()))
+            error!("error: {:?}", e);
+            Err(err_response_handler(
+                "abort is failed, workers is not found",
+                &e.to_string(),
+            ))
         }
     }
 }
@@ -145,11 +156,29 @@ async fn post_controller(
     let controller: funcs::task::Controller = match serde_json::from_value(value.clone()) {
         Ok(v) => v,
         Err(e) => {
-            return Err(
-                json!({"error": format!("controller is not found, {}", e ), "value": value}),
-            )
+            return Err(err_response_handler(
+                "controller is invalid",
+                &e.to_string(),
+            ));
         }
     };
+
+    if !controller.is_ok() {
+        // 更新が行われない場合はエラー
+        // - controllerが実行中の場合
+        if controller.is_running {
+            return Err(err_response_handler(
+                "controller is running, please stop controller",
+                "runner is running, please stop_controller",
+            ));
+        } else {
+            // - controllerが不正な値の場合
+            return Err(err_response_handler(
+                "controller is not update, please check value",
+                &value.to_string(),
+            ));
+        }
+    }
 
     let mut w = state.write().await;
     w.controller = controller.clone();
@@ -198,12 +227,15 @@ async fn get_instruments(
 ) -> Result<Value, Value> {
     let r = state.read().await;
 
-    println!("exchange_name: {}", exchange_name);
-
     let instruments: Vec<target::exchanges::models::Instrument> =
         match r.controller.exchange.instruments().await {
             Ok(v) => v,
-            Err(e) => return Err(json!({"error": format!("instruments is not found, {}",e)})),
+            Err(e) => {
+                return Err(err_response_handler(
+                    "instruments is not found",
+                    &e.to_string(),
+                ))
+            }
         };
 
     Ok(json!(instruments))
@@ -228,7 +260,7 @@ async fn get_ticker(
         .await
     {
         Ok(v) => v,
-        Err(e) => return Err(json!({"error": format!("ticker is not found, {}",e)})),
+        Err(e) => return Err(err_response_handler("ticker is not found", &e.to_string())),
     };
 
     Ok(json!(ticker))
@@ -290,4 +322,8 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn err_response_handler(msg: &str, cause: &str) -> Value {
+    json!({"msg": msg, "cause": cause})
 }

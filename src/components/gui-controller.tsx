@@ -107,13 +107,13 @@ export const FormComponent = () => {
                 duration: 3,
                 content: `Board tracking is ${controller.is_running ? 'is running' : 'was stoped'}`
             });
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
             // error message
             message.open({
                 type: 'error',
                 duration: 3,
-                content: 'Failed to start board tracking'
+                content: `${error.msg}, cause: ${error.cause}`
             });
         } finally {
             setLoading(false);
@@ -131,13 +131,13 @@ export const FormComponent = () => {
                 duration: 3,
                 content: `Board tracking ${controller.is_running ? 'is running' : 'was stoped'}`
             });
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
             // error message
             message.open({
                 type: 'error',
                 duration: 3,
-                content: 'Failed to stop board tracking'
+                content: `${error.msg}, cause: ${error.cause}`
             });
         } finally {
             setLoading(false);
@@ -152,8 +152,18 @@ export const FormComponent = () => {
 
             const res = await invoke('post_controller', { value: values });
             console.log(res);
-        } catch (error) {
+            message.open({
+                type: 'success',
+                duration: 3,
+                content: 'Setting updated successfully'
+            });
+        } catch (error: any) {
             console.error(error);
+            message.open({
+                type: 'error',
+                duration: 3,
+                content: `${error.msg}, cause: ${error.cause}`
+            });
         } finally {
             setLoading(false);
         }
