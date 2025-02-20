@@ -278,25 +278,27 @@ export const FormComponent = () => {
                         <Input />
                     </Form.Item>
 
-                    {showPassphrase ? (
-                        null
-                    ) : <Form.Item<Controller>
+                    <Form.Item<Controller>
                         label={t('secret.label')}
                         tooltip={t('secret.description')}
                         name={["exchange", "secret"]}
                         rules={[{ required: true, message: 'Please input your exchange secret key' }]}
                     >
                         <Input.Password />
-                    </Form.Item>}
-
-                    <Form.Item<Controller>
-                        label={t('passphrase.label')}
-                        tooltip={t('passphrase.description')}
-                        name={["exchange", "passphrase"]}
-                        rules={[{ required: false, message: 'Please input exchange passphrase' }]}
-                    >
-                        <Input />
                     </Form.Item>
+
+                    {showPassphrase ? (
+                        <Form.Item<Controller>
+                            label={t('passphrase.label')}
+                            tooltip={t('passphrase.description')}
+                            name={["exchange", "passphrase"]}
+                            rules={[{ required: false, message: 'Please input exchange passphrase' }]}
+                        >
+                            <Input />
+                        </Form.Item>
+                    ) :
+                        null
+                    }
 
                     <Form.Item<Controller>
                         label={t('boardSide.label')}
