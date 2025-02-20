@@ -2,6 +2,9 @@
 
 ※ [Pre], [ProtoType] since 2025/02/20
 
+![summary_en](https://github.com/howlrs/lotus-root-chef/blob/images/images/summary_en.png?raw=true)
+![summary_ja](https://github.com/howlrs/lotus-root-chef/blob/images/images/summary_ja.png?raw=true)
+
 レンコンシェフは、指定価格帯の指定枚数の板に対して、追従しながら指値を行います。
 デスクトップアプリが付随し、ローカルにて稼働します。指値速度はネットワーク(ping)に依存し、板探索はCPUに依存します。探索は価格板配列500でおおよそ10-50μs程度で、ping:20msかつAPI稼働通常時と仮定したとき取引所への板配置完了は100ms前後（取引所API稼働状態にも依ります）です。
 以下パラメータで探索、注文の設定が可能です。
