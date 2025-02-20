@@ -105,7 +105,6 @@ impl Config {
 
     pub async fn ticker(
         &self,
-        exchange: ExchangeName,
         symbol: String,
         tx_ws: tokio::sync::mpsc::Sender<Ticker>,
         rx_rest: tokio::sync::mpsc::Receiver<()>,
@@ -114,7 +113,7 @@ impl Config {
         let cloned_tx_ws = tx_ws.clone();
         let cloned_tx_rest = tx_rest.clone();
 
-        let handle = match exchange {
+        let handle = match self.name {
             ExchangeName::Bybit => {
                 let category = "linear".to_string();
                 let symbol = symbol.clone();
@@ -148,7 +147,6 @@ impl Config {
 
     pub async fn orderboard(
         &self,
-        exchange: ExchangeName,
         symbol: String,
         tx_ws: tokio::sync::mpsc::Sender<Orderboard>,
         rx_rest: tokio::sync::mpsc::Receiver<()>,
@@ -157,7 +155,7 @@ impl Config {
         let cloned_tx_ws = tx_ws.clone();
         let cloned_tx_rest = tx_rest.clone();
 
-        let handle = match exchange {
+        let handle = match self.name {
             ExchangeName::Bybit => {
                 let category = "linear".to_string();
                 let symbol = symbol.clone();
@@ -194,7 +192,6 @@ impl Config {
 
     pub async fn position(
         &self,
-        exchange: ExchangeName,
         symbol: String,
         tx_ws: tokio::sync::mpsc::Sender<Vec<Position>>,
         rx_rest: tokio::sync::mpsc::Receiver<()>,
@@ -203,7 +200,7 @@ impl Config {
         let cloned_tx_ws = tx_ws.clone();
         let cloned_tx_rest = tx_rest.clone();
 
-        let handle = match exchange {
+        let handle = match self.name {
             ExchangeName::Bybit => {
                 let category = self.category.clone().unwrap_or("spot".to_string());
                 let symbol = symbol.clone();
@@ -238,34 +235,40 @@ impl Config {
 
         Ok(handle)
     }
+}
 
-    pub async fn instruments(&self) -> Result<Vec<exchanges::models::Instrument>, String> {
-        match self.name {
-            ExchangeName::Bybit => {
-                match exchanges::bybit::instruments("linear".to_string()).await {
-                    Ok(v) => Ok(v),
-                    Err(e) => Err(e.to_string()),
-                }
+// Exchange型が満ちていない状況での使用を想定しているので、impl外での実装
+pub async fn get_rest_instruments(
+    exchange_name: ExchangeName,
+) -> Result<Vec<exchanges::models::Instrument>, String> {
+    match exchange_name {
+        ExchangeName::Bybit => {
+            let category = "linear".to_string();
+            match exchanges::bybit::instruments(category).await {
+                Ok(v) => Ok(v),
+                Err(e) => Err(e.to_string()),
             }
-            ExchangeName::Bitbank => Ok(vec![]),
-            ExchangeName::Bitflyer => Ok(vec![]),
         }
+        ExchangeName::Bitbank => Ok(vec![]),
+        ExchangeName::Bitflyer => Ok(vec![]),
     }
+}
 
-    pub async fn ticker_info(
-        &self,
-        exchange_name: ExchangeName,
-        symbol: String,
-    ) -> Result<exchanges::models::Ticker, String> {
-        match exchange_name {
-            ExchangeName::Bybit => {
-                match exchanges::bybit::ticker("linear".to_string(), symbol).await {
-                    Ok(v) => Ok(v),
-                    Err(e) => Err(e.to_string()),
-                }
+pub async fn get_rest_ticker_info(
+    exchange_name: ExchangeName,
+    symbol: String,
+) -> Result<exchanges::models::Ticker, String> {
+    match exchange_name {
+        ExchangeName::Bybit => {
+            // linearが多くの銘柄をカバーしているため、categoryは固定
+            // 厳密な値は不要、用途としては見込み価格帯の把握
+            let category = "linear".to_string();
+            match exchanges::bybit::ticker(category, symbol).await {
+                Ok(v) => Ok(v),
+                Err(e) => Err(e.to_string()),
             }
-            ExchangeName::Bitbank => Ok(exchanges::models::Ticker::default()),
-            ExchangeName::Bitflyer => Ok(exchanges::models::Ticker::default()),
         }
+        ExchangeName::Bitbank => Ok(exchanges::models::Ticker::default()),
+        ExchangeName::Bitflyer => Ok(exchanges::models::Ticker::default()),
     }
 }

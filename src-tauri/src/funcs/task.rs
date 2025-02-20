@@ -382,7 +382,6 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
 
     let handle_orderboard = exchange_config
         .orderboard(
-            target_exchange.clone(),
             target_symbol.clone(),
             tx_ws_orderboard,
             recive_rest_orderboard,
@@ -394,7 +393,6 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
 
     let handle_ticker = exchange_config
         .ticker(
-            target_exchange.clone(),
             target_symbol.clone(),
             tx_ws_ticker,
             recive_rest_ticker,
@@ -406,7 +404,6 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
 
     let handle_position = exchange_config
         .position(
-            target_exchange.clone(),
             target_symbol.clone(),
             tx_ws_position,
             recive_rest_position,
