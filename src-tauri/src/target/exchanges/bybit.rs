@@ -1,0 +1,581 @@
+use crypto_botters::{
+    bybit::{BybitHttpAuth, BybitOption},
+    Client,
+};
+use futures_util::future::pending;
+use log::trace;
+
+use serde_json::json;
+
+use crate::{
+    board::book::Book,
+    target::exchanges::{
+        bybit_models::{
+            ApiDefaultResponse, ApiOrderResponse, ApiOrderbook, InstrumentInfo, TickerInfo,
+        },
+        models::{DataType, Instrument, OrderClient, OrderSide, Orderboard, Position, Ticker},
+    },
+};
+
+use tokio::sync::{
+    broadcast,
+    mpsc::{Receiver, Sender},
+};
+use tokio::{spawn, task::JoinHandle};
+
+pub struct BybitClient {
+    client: Client,
+    category: String,
+    symbol: String,
+}
+
+impl OrderClient for BybitClient {
+    fn new_for_order_client(
+        key: String,
+        secret: String,
+        _passphrase: Option<String>,
+        category: Option<String>,
+        symbol: String,
+    ) -> Self {
+        let mut client = Client::new();
+        client.update_default_option(BybitOption::Key(key));
+        client.update_default_option(BybitOption::Secret(secret));
+        let client = client.clone();
+
+        let category = category.unwrap_or("spot".to_string());
+
+        BybitClient {
+            client,
+            category,
+            symbol,
+        }
+    }
+
+    async fn cancel(&self, order_id: String) -> Result<(), String> {
+        let res: ApiOrderResponse = match self
+            .client
+            .post(
+                "/v5/order/cancel",
+                Some(json!({
+                    "category": self.category.clone(),
+                    "symbol": self.symbol.clone(),
+                    "orderLinkId": order_id
+                })),
+                [BybitOption::HttpAuth(BybitHttpAuth::V3AndAbove)],
+            )
+            .await
+        {
+            Ok(res) => res,
+            Err(e) => return Err(e.to_string()),
+        };
+        if res.ret_code != 0 {
+            return Err(res.ret_msg);
+        }
+
+        Ok(())
+    }
+
+    async fn order(
+        &self,
+        order_id: Option<String>,
+        side: OrderSide,
+        price: f64,
+        qty: f64,
+        is_post_only: bool,
+    ) -> Result<String, String> {
+        let order_id = order_id.unwrap_or("".to_string());
+        let oside = match side {
+            OrderSide::Buy => "Buy",
+            OrderSide::Sell => "Sell",
+        };
+        let tif = if is_post_only { "PostOnly" } else { "GTC" };
+
+        let res: ApiOrderResponse = match self
+            .client
+            .post(
+                "/v5/order/create",
+                Some(json!({
+                    "category": self.category.clone(),
+                    "symbol": self.symbol.clone(),
+                    "orderLinkId": order_id,
+                    "side": oside,
+                    "price": price,
+                    "qty": qty,
+                    "timeInForce": tif,
+                })),
+                [BybitOption::HttpAuth(BybitHttpAuth::V3AndAbove)],
+            )
+            .await
+        {
+            Ok(res) => res,
+            Err(e) => return Err(e.to_string()),
+        };
+        if res.ret_code != 0 {
+            return Err(res.ret_msg);
+        }
+
+        Ok(res.result.order_link_id)
+    }
+}
+
+impl BybitClient {
+    pub fn new(
+        key: Option<String>,
+        secret: Option<String>,
+        category: String,
+        symbol: String,
+    ) -> Self {
+        let mut client = Client::new();
+        if let Some(key) = key {
+            client.update_default_option(BybitOption::Key(key));
+        }
+        if let Some(secret) = secret {
+            client.update_default_option(BybitOption::Secret(secret));
+        }
+        let client = client.clone();
+
+        BybitClient {
+            client,
+            category,
+            symbol,
+        }
+    }
+
+    pub async fn public_ticker(
+        &self,
+        // websocket用
+        tx_ws_ticker: Sender<Ticker>,
+        // rest用取得依頼
+        // why: websocket非実装の場合、必要に応じてRestRequestを実行する
+        // API Limitの観点から必要に応じてのみ実行する
+        mut rx_rest_ticker: Receiver<()>,
+        // rest用取得結果通知用
+        // why: websocket非実装の場合、必要に応じてRestRequest結果を送信する
+        tx_rest_ticker: broadcast::Sender<Ticker>,
+    ) -> Result<JoinHandle<()>, String> {
+        let client = self.client.clone();
+        let category = self.category.clone();
+        let symbol = self.symbol.clone();
+
+        let handler = spawn(async move {
+            let url_string = format!("/v5/public/{}", category.clone());
+            let url = url_string.as_str();
+            let set_symbol = symbol.clone();
+
+            let _connection = client
+                .websocket(
+                    url,
+                    move |message| {
+                        let data = message.clone()["data"].take();
+
+                        let ltp = match data["lastPrice"].as_str() {
+                            Some(v) => v.parse::<f64>().unwrap(),
+                            None => return,
+                        };
+                        let v24 = match data["volume24h"].as_str() {
+                            Some(v) => v.parse::<f64>().unwrap(),
+                            None => return,
+                        };
+                        let bid = match data["bid1Price"].as_str() {
+                            Some(v) => v.parse::<f64>().unwrap(),
+                            None => return,
+                        };
+                        let ask = match data["ask1Price"].as_str() {
+                            Some(v) => v.parse::<f64>().unwrap(),
+                            None => return,
+                        };
+
+                        match tx_ws_ticker.try_send(Ticker::new(
+                            set_symbol.clone(),
+                            ltp,
+                            v24,
+                            ask,
+                            bid,
+                        )) {
+                            Ok(()) => (),
+                            Err(e) => {
+                                trace!("error: {}", e);
+                            }
+                        };
+                    },
+                    [
+                        BybitOption::WebSocketTopics(vec![
+                            format!("tickers.{}", symbol.clone()).to_owned()
+                        ]),
+                        BybitOption::WebSocketAuth(true),
+                    ],
+                )
+                .await
+                .expect("Failed to connect to websocket");
+
+            loop {
+                tokio::select! {
+                    result = rx_rest_ticker.recv() => {
+                        if result.is_some() {
+                            // rest用取得依頼
+                            // 実取得
+                            let ltp = 0.0;
+                            let v24 = 0.0;
+                            let bid = 0.0;
+                            let ask = 0.0;
+
+
+                            // rest用取得結果通知
+                            tx_rest_ticker.send(Ticker::new(symbol.clone(),ltp, v24, ask,bid)).unwrap();
+                        }
+                    }
+                    _ = pending::<()>() => {},
+                }
+            }
+        });
+
+        Ok(handler)
+    }
+
+    pub async fn public_orderboard(
+        &self,
+        depth: Option<i64>,
+        // websocket用
+        tx_ws_orderboard: Sender<Orderboard>,
+        // rest用取得依頼
+        // why: websocket非実装の場合、必要に応じてRestRequestを実行する
+        // API Limitの観点から必要に応じてのみ実行する
+        mut rx_rest_orderboard: Receiver<()>,
+        // rest用取得結果通知用
+        // why: websocket非実装の場合、必要に応じてRestRequest結果を送信する
+        tx_rest_orderboard: broadcast::Sender<Orderboard>,
+    ) -> Result<JoinHandle<()>, String> {
+        let client = self.client.clone();
+        let category = self.category.clone();
+        let symbol = self.symbol.clone();
+        let set_depth = depth.unwrap_or(200);
+
+        let handler = spawn(async move {
+            let url_string = format!("/v5/public/{}", category.clone());
+            let url = url_string.as_str();
+            let set_symbol = symbol.clone();
+
+            let _connection = client
+                .websocket(
+                    url,
+                    move |message| {
+                        let data = message.clone()["data"].take();
+                        let data_type = match message.clone()["type"].as_str() {
+                            Some(v) => match v {
+                                "snapshot" => DataType::Snapshot,
+                                "delta" => DataType::UpdateDelta,
+                                _ => DataType::Snapshot,
+                            },
+                            None => return,
+                        };
+                        let get_orderboards: ApiOrderbook = match serde_json::from_value(data) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                trace!("error: {}", e);
+                                ApiOrderbook {
+                                    s: "".to_owned(),
+                                    b: vec![], // Bids [price, size]
+                                    a: vec![], // Asks [price, size]
+                                    u: 0,      // Update ID
+                                    seq: 0,    // Sequence number
+                                }
+                            }
+                        };
+
+                        // create generic orderboard
+                        let mut a = vec![];
+                        let mut b = vec![];
+                        for book in get_orderboards.a {
+                            a.push(Book {
+                                price: book[0].parse().unwrap(),
+                                size: book[1].parse().unwrap(),
+                            });
+                        }
+                        for book in get_orderboards.b {
+                            b.push(Book {
+                                price: book[0].parse().unwrap(),
+                                size: book[1].parse().unwrap(),
+                            });
+                        }
+
+                        match tx_ws_orderboard.try_send(Orderboard::new(
+                            data_type.clone(),
+                            set_symbol.clone(),
+                            a,
+                            b,
+                            None,
+                            Some(get_orderboards.u),
+                        )) {
+                            Ok(()) => (),
+                            Err(e) => {
+                                trace!("error: {}", e);
+                            }
+                        };
+                    },
+                    [
+                        BybitOption::WebSocketTopics(vec![format!(
+                            "orderbook.{}.{}",
+                            set_depth,
+                            symbol.clone()
+                        )
+                        .to_owned()]),
+                        BybitOption::WebSocketAuth(false),
+                    ],
+                )
+                .await
+                .expect("Failed to connect to websocket");
+
+            loop {
+                tokio::select! {
+                    result = rx_rest_orderboard.recv() => {
+                        if result.is_some() {
+                            // rest用取得依頼
+                            // 実取得
+
+                            let o = Orderboard::new(DataType::Snapshot,symbol.clone(), vec![], vec![], None, None);
+
+                            // rest用取得結果通知
+                            tx_rest_orderboard.send(o).unwrap();
+                        }
+                    }
+                    _ = pending::<()>() => {},
+                }
+            }
+        });
+
+        Ok(handler)
+    }
+
+    pub async fn private_position(
+        &self,
+        // websocket用
+        tx_ws_position: Sender<Vec<Position>>,
+        // rest用取得依頼
+        // why: websocket非実装の場合、必要に応じてRestRequestを実行する
+        // API Limitの観点から必要に応じてのみ実行する
+        mut rx_rest_position: Receiver<()>,
+        // rest用取得結果通知用
+        // why: websocket非実装の場合、必要に応じてRestRequest結果を送信する
+        tx_rest_position: broadcast::Sender<Vec<Position>>,
+    ) -> Result<JoinHandle<()>, String> {
+        let client = self.client.clone();
+        let set_symbol = self.symbol.clone();
+
+        let handler = spawn(async move {
+            let url = "/v5/private";
+            let _connection = client
+                .websocket(
+                    url,
+                    move |message| {
+                        let data = message.clone()["data"].take();
+                        let get_positions: Vec<Position> = match serde_json::from_value(data) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                println!("error: {}", e);
+                                vec![]
+                            }
+                        };
+
+                        let use_positions = get_positions
+                            .into_iter()
+                            .filter(|p| p.symbol == set_symbol)
+                            .collect::<Vec<Position>>();
+
+                        if use_positions.is_empty() {
+                            return;
+                        }
+
+                        match tx_ws_position.try_send(use_positions) {
+                            Ok(()) => (),
+                            Err(e) => {
+                                trace!("error: {}", e);
+                            }
+                        };
+                    },
+                    [
+                        BybitOption::WebSocketTopics(vec!["position".to_owned()]),
+                        BybitOption::WebSocketAuth(true),
+                    ],
+                )
+                .await
+                .expect("Failed to connect to websocket");
+
+            loop {
+                tokio::select! {
+                    result = rx_rest_position.recv() => {
+                        if result.is_some() {
+                            // rest用取得依頼
+                            // 実取得
+
+                            // rest用取得結果通知
+                            tx_rest_position.send(vec![]).unwrap();
+                        }
+                    }
+                    _ = pending::<()>() => {},
+                }
+            }
+        });
+
+        Ok(handler)
+    }
+
+    // pub async fn cancel(&self, category: String, order_id: String) -> Result<(), String> {
+    //     let res: ApiOrderResponse = match self
+    //         .client
+    //         .post(
+    //             "/v5/order/cancel",
+    //             Some(json!({
+    //                 "category": category,
+    //                 "symbol": self.symbol.clone(),
+    //                 "orderLinkId": order_id
+    //             })),
+    //             [BybitOption::HttpAuth(BybitHttpAuth::V3AndAbove)],
+    //         )
+    //         .await
+    //     {
+    //         Ok(res) => res,
+    //         Err(e) => return Err(e.to_string()),
+    //     };
+    //     if res.ret_code != 0 {
+    //         return Err(res.ret_msg);
+    //     }
+
+    //     Ok(())
+    // }
+
+    // pub async fn place_order(
+    //     &self,
+    //     category: String,
+    //     order_id: String,
+    //     side: Side,
+    //     price: f64,
+    //     qty: f64,
+    //     is_post_only: bool,
+    // ) -> Result<String, String> {
+    //     let place_side = match side {
+    //         Side::Ask => "Sell",
+    //         Side::Bid => "Buy",
+    //     };
+
+    //     let res: ApiOrderResponse = match self
+    //         .client
+    //         .post(
+    //             "/v5/order/create",
+    //             Some(json!({
+    //                 "category": category,
+    //                 "symbol": self.symbol.clone(),
+    //                 "orderLinkId": order_id,
+    //                 "side": place_side,
+    //                 "price": price,
+    //                 "qty": qty,
+    //                 "timeInForce": if is_post_only { "PostOnly" } else { "GTC" }
+    //             })),
+    //             [BybitOption::HttpAuth(BybitHttpAuth::V3AndAbove)],
+    //         )
+    //         .await
+    //     {
+    //         Ok(res) => res,
+    //         Err(e) => return Err(e.to_string()),
+    //     };
+    //     if res.ret_code != 0 {
+    //         return Err(res.ret_msg);
+    //     }
+
+    //     Ok(res.result.order_link_id)
+    // }
+}
+
+pub async fn instruments(category: String) -> Result<Vec<Instrument>, String> {
+    let client = Client::new();
+
+    // public GET
+    let res: ApiDefaultResponse = match client
+        .get(
+            "/v5/market/instruments-info",
+            Some(&[("category", category)]),
+            [BybitOption::Default],
+        )
+        .await
+    {
+        Ok(res) => res,
+        Err(e) => return Err(e.to_string()),
+    };
+    if res.ret_code != 0 {
+        return Err(res.ret_msg);
+    }
+
+    let list: Vec<InstrumentInfo> = serde_json::from_value(res.result.list).unwrap();
+
+    let mut instruments = vec![];
+    for info in list {
+        let instrument = Instrument {
+            symbol: info.symbol,
+            ltp: 0.0,
+            volume24h: 0.0,
+            price_tick: info.price_filter.tick_size.parse().unwrap(),
+            size_tick: info.lot_size_filter.qty_step.parse().unwrap(),
+            size_min: info.lot_size_filter.min_order_qty.parse().unwrap(),
+        };
+        instruments.push(instrument);
+    }
+
+    Ok(instruments)
+}
+
+pub async fn ticker(category: String, symbol: String) -> Result<Ticker, String> {
+    let client = Client::new();
+    // public GET
+    let res: ApiDefaultResponse = match client
+        .get(
+            "/v5/market/tickers",
+            Some(&[("category", category), ("symbol", symbol.clone())]),
+            [BybitOption::Default],
+        )
+        .await
+    {
+        Ok(res) => res,
+        Err(e) => return Err(e.to_string()),
+    };
+    if res.ret_code != 0 {
+        return Err(res.ret_msg);
+    }
+
+    let tickers = serde_json::from_value::<Vec<TickerInfo>>(res.result.list).unwrap();
+    let target_ticker = tickers.iter().find(|t| t.symbol == symbol).unwrap();
+    let ticker = Ticker {
+        symbol: target_ticker.symbol.clone(),
+        ltp: target_ticker.last_price.parse().unwrap(),
+        volume24h: target_ticker.volume_24h.parse().unwrap(),
+        best_ask: target_ticker.ask1_price.parse().unwrap(),
+        best_bid: target_ticker.bid1_price.parse().unwrap(),
+    };
+
+    Ok(ticker)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_instruments() {
+        let category = "linear".to_string();
+        let instruments = instruments(category).await.unwrap();
+        println!("{:?}", instruments);
+    }
+
+    #[tokio::test]
+    async fn test_ticker() {
+        let category = "linear".to_string();
+        let symbol = "BTCUSDT".to_string();
+        let ticker = match ticker(category, symbol).await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("error: {}", e);
+                Ticker::default()
+            }
+        };
+
+        println!("{:?}", ticker);
+    }
+}
