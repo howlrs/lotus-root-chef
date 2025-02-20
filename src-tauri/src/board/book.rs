@@ -124,7 +124,7 @@ impl Orderboard {
         self.update_at
     }
 
-    pub fn update_delta(&mut self, target_side: BookSide, books: Vec<Book>) {
+    pub fn update_delta(&mut self, target_side: BookSide, books: Vec<Book>) -> DateTime<Utc> {
         let mut target_book = match target_side {
             BookSide::Ask => self.ask.write().unwrap(),
             BookSide::Bid => self.bid.write().unwrap(),
@@ -138,13 +138,19 @@ impl Orderboard {
 
             target_book.insert(OrderedFloat(book.price), book);
         }
+
+        self.update_at = Utc::now();
+        self.update_at
     }
 
-    pub fn push(&mut self, target_side: BookSide, book: Book) {
+    pub fn push(&mut self, target_side: BookSide, book: Book) -> DateTime<Utc> {
         match target_side {
             BookSide::Ask => self.push_to_ask(book),
             BookSide::Bid => self.push_to_bid(book),
         }
+
+        self.update_at = Utc::now();
+        self.update_at
     }
 
     pub fn push_to_ask(&mut self, book: Book) {
