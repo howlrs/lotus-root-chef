@@ -81,10 +81,9 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
     // 当関数内のみで使用する変数を生成
     // 当関数はControllerが更新されるごとに再生成される
     // Websocketの送受信用のチャネルは都度接続され、停止される
-    let (target_exchange, target_symbol, exchange_config, board_config, order_config) = {
+    let (target_symbol, exchange_config, board_config, order_config) = {
         let r = controller.read().await;
         (
-            r.exchange.name.clone(),
             r.order.symbol.clone(),
             Arc::new(r.exchange.clone()),
             Arc::new(r.board.clone()),
