@@ -284,3 +284,106 @@ impl Book {
         self.size > size
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_target_book_ask_without_prev_exclusion() {
+        // 検索対象価格の設定
+        let price_min = 1;
+        let target_price = 99;
+        // 見つかった価格を自分の指値として除外する
+        let execuded_price = Some(99.0);
+        // 期待する値
+        let is_expected = false;
+        let expected_price = 0.0;
+        let expected_best_ask = 1.0;
+
+        // 対象データの生成
+        let mut board = Orderboard::new();
+        // 価格が [1.0, 2.0, ..., 100.0] の等差数列で100個のブックを生成します。
+        let mut books = Vec::new();
+        for i in price_min..=100 {
+            // すべてのブックはサイズが1.0で、is_largeの条件を満たしています。
+            // 99の倍数のブックのサイズは1.5です。
+            // 検索対象を1.0に設定します。
+            let size = if i % target_price as usize == 0 {
+                1.5
+            } else {
+                1.0
+            };
+            books.push(Book::new(size, i as f64));
+        }
+        board.extend_ask(books);
+
+        // Askサイドのテスト設定を作成します。価格範囲は[1.0, 150.0]、最小サイズは1.0です。
+        let config = Config {
+            side: BookSide::Ask,
+            // 価格範囲
+            hight: 150.0,
+            low: 1.0,
+            // 検索対象サイズ
+            size: 1.0,
+        };
+
+        // 前回の自身の注文価格は提供されていません。
+        let (price, is_found) = board.target_book(&config, execuded_price);
+        // Askの場合、最も低い有効な価格が選択されるはずです: 1.0。
+        assert_eq!(is_found, is_expected);
+        assert_eq!(price, expected_price);
+
+        let best_ask = board.best(BookSide::Ask);
+        assert_eq!(best_ask, expected_best_ask);
+    }
+
+    #[test]
+    fn test_target_book_bid_with_prev_exclusion() {
+        // 検索対象価格の設定
+        let price_max = 100;
+        let target_price = 71;
+        // 見つかった価格を自分の指値として除外する
+        let execuded_price = None;
+        // 期待する値
+        let is_expected = true;
+        let expected_price = 71.0;
+        let expected_best_bid = 100.0;
+
+        // 対象データの生成
+        let mut board = Orderboard::new();
+        // 価格が [1.0, 2.0, ..., 100.0] の等差数列で100個のブックを生成します。
+        let mut books = Vec::new();
+        for i in 1..=price_max {
+            // すべてのブックはサイズが1.0で、is_largeの条件を満たしています。
+            // 99の倍数のブックのサイズは1.5です。
+            // 検索対象を1.0に設定します。
+            let size = if i % target_price as usize == 0 {
+                1.5
+            } else {
+                1.0
+            };
+            books.push(Book::new(size, i as f64));
+        }
+        board.extend_bid(books);
+
+        // Askサイドのテスト設定を作成します。価格範囲は[1.0, 150.0]、最小サイズは1.0です。
+        let config = Config {
+            side: BookSide::Bid,
+            // 価格範囲
+            hight: 150.0,
+            low: 1.0,
+            // 検索対象サイズ
+            size: 1.0,
+        };
+
+        // 前回の自身の注文価格は提供されていません。
+        let (price, is_found) = board.target_book(&config, execuded_price);
+        // Askの場合、最も低い有効な価格が選択されるはずです: 1.0。
+        assert_eq!(is_found, is_expected);
+        assert_eq!(price, expected_price);
+
+        let best_bid = board.best(BookSide::Bid);
+        assert_eq!(best_bid, expected_best_bid);
+    }
+}
