@@ -16,9 +16,6 @@ pub struct Config {
     pub low: f64,
     // 指定サイズ
     pub size: f64,
-
-    // 自身の注文価格を除外するか
-    pub execluded_own_order_price: Option<f64>,
 }
 
 impl Config {
