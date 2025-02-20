@@ -35,7 +35,6 @@ impl Config {
             order_id: None,
             price: None,
             qty: self.size,
-            on_board_reamining: 0.0,
             interval_sec: self.interval_sec,
             latest_at: None,
         }
@@ -63,7 +62,6 @@ pub struct OrderInfo {
     pub order_id: Option<String>,
     pub price: Option<f64>,
     pub qty: f64,
-    pub on_board_reamining: f64,
     pub interval_sec: i64,
     pub latest_at: Option<DateTime<chrono::Utc>>,
 }
@@ -75,7 +73,6 @@ impl OrderInfo {
             order_id: None,
             price: None,
             qty: 0.0,
-            on_board_reamining: 0.0,
             interval_sec: 5,
             latest_at: None,
         }

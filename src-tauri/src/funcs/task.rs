@@ -362,7 +362,9 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
                             let mut w = cloned_logger.write().await;
                             w.add(Log {
                                 level: "info".to_string(),
-                                message: format!("order created order id: {:?}, price: {}", latest_order_id, target_price),
+                                message: format!("order created order id: {:?}, price: {}, size: {}", latest_order_id,
+                                target_price,
+                                ramaining_qty_as_order_qty),
                                 timestamp: chrono::Local::now().to_string(),
                             });
                         }

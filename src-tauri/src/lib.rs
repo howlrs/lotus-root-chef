@@ -1,4 +1,4 @@
-use log::{debug, error, trace};
+use log::{debug, error};
 use std::env;
 use std::sync::Arc;
 use tokio::sync::RwLock;
