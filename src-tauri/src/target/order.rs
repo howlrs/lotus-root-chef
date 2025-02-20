@@ -16,6 +16,7 @@ pub struct Config {
 }
 
 impl Config {
+    #[allow(unused)]
     pub fn new(symbol: String, size: f64, side: OrderSide) -> Self {
         Config {
             symbol,
@@ -68,6 +69,7 @@ pub struct OrderInfo {
 }
 
 impl OrderInfo {
+    #[allow(unused)]
     pub fn new() -> Self {
         OrderInfo {
             order_id: None,

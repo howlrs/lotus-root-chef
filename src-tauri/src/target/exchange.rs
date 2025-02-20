@@ -66,6 +66,7 @@ pub struct Config {
 }
 
 impl Config {
+    #[allow(unused)]
     pub fn new(
         name: ExchangeName,
         key: String,

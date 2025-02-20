@@ -2,7 +2,7 @@ use core::panic;
 use std::future::pending;
 use std::sync::Arc;
 
-use log::{info, log_enabled, trace};
+use log::{error, info, log_enabled, trace};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 use tokio::task::{spawn, JoinError, JoinHandle};
@@ -61,6 +61,15 @@ impl Logger {
     }
 
     pub fn add(&mut self, log: Log) {
+        if log_enabled!(log::Level::Info) {
+            match log.level.as_str() {
+                "info" => info!("{}", log.message),
+                "error" => error!("{}", log.message),
+                "success" => info!("{}", log.message),
+                _ => (),
+            }
+        }
+
         self.log.push(log);
     }
 
@@ -151,7 +160,7 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
                     let mut w = cloned_positions.write().await;
                     *w = pos.clone();
 
-                    println!("position: {:?}", pos);
+                    info!("position: {:?}", pos);
                 }
                 _ = pending::<()>() => {
                     // handle.abort()を待つ
@@ -311,17 +320,15 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
                             if remain <= 0.0 {
                                 // すべて約定している場合はログを追加
                                 let mut w = cloned_logger.write().await;
-                                let msg = format!("[completed] close runner by latest order id: {:?}, order size: {}, executed size: {}", order_id, remain, has_position.qty);
                                 w.add(Log {
                                     level: "success".to_string(),
-                                    message: msg.clone(),
+                                    message: format!("[completed] close runner by latest order id: {:?}, order size: {}, executed size: {}", order_id, remain, has_position.qty),
                                     timestamp: chrono::Local::now().to_string(),
                                 });
 
                                 // 終了フラグを立てる
                                 cloned_cancel_handle.cancel();
                                 // 終了フラグはRunner.handlesが管理するspawn処理の.awaitに対して伝播し、全てのspawnが終了する
-                                println!("{}",msg);
                                 break;
                             } 
                             
@@ -351,8 +358,6 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
                             // - set_order: 注文ID及び最終注文時間を更新する
                             let mut w = cloned_order_manage.lock().await;
                             w.set_order(latest_order_id.clone());
-
-                            trace!("crated order id: {:?}", latest_order_id);
 
                             let mut w = cloned_logger.write().await;
                             w.add(Log {
@@ -435,7 +440,7 @@ async fn get_positions(
         match rx.recv().await {
             Ok(pos) => pos,
             Err(e) => {
-                println!("get_positions error: {:?}", e);
+                error!("get_positions error: {:?}", e);
                 vec![]
             }
         }

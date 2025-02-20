@@ -3,7 +3,7 @@ use crypto_botters::{
     Client,
 };
 use futures_util::future::pending;
-use log::trace;
+use log::{error, trace};
 
 use serde_json::json;
 
@@ -72,6 +72,8 @@ impl OrderClient for BybitClient {
             return Err(res.ret_msg);
         }
 
+        trace!("cancel order: {}, response: {:?}", order_id, res);
+
         Ok(())
     }
 
@@ -113,6 +115,8 @@ impl OrderClient for BybitClient {
         if res.ret_code != 0 {
             return Err(res.ret_msg);
         }
+
+        trace!("place order: {}, response: {:?}", order_id, res);
 
         Ok(res.result.order_link_id)
     }
@@ -168,6 +172,8 @@ impl BybitClient {
                     move |message| {
                         let data = message.clone()["data"].take();
 
+                        trace!("ticker raw data: {}", data);
+
                         let ltp = match data["lastPrice"].as_str() {
                             Some(v) => v.parse::<f64>().unwrap(),
                             None => return,
@@ -194,7 +200,7 @@ impl BybitClient {
                         )) {
                             Ok(()) => (),
                             Err(e) => {
-                                trace!("error: {}", e);
+                                error!("error: {}", e);
                             }
                         };
                     },
@@ -260,6 +266,9 @@ impl BybitClient {
                     url,
                     move |message| {
                         let data = message.clone()["data"].take();
+
+                        trace!("orderboard raw data: {}", data);
+
                         let data_type = match message.clone()["type"].as_str() {
                             Some(v) => match v {
                                 "snapshot" => DataType::Snapshot,
@@ -308,7 +317,7 @@ impl BybitClient {
                         )) {
                             Ok(()) => (),
                             Err(e) => {
-                                trace!("error: {}", e);
+                                error!("error: {}", e);
                             }
                         };
                     },
@@ -368,6 +377,9 @@ impl BybitClient {
                     url,
                     move |message| {
                         let data = message.clone()["data"].take();
+
+                        trace!("position raw data: {}", data);
+
                         let get_positions: Vec<Position> = match serde_json::from_value(data) {
                             Ok(v) => v,
                             Err(e) => {
@@ -388,7 +400,7 @@ impl BybitClient {
                         match tx_ws_position.try_send(use_positions) {
                             Ok(()) => (),
                             Err(e) => {
-                                trace!("error: {}", e);
+                                error!("error: {}", e);
                             }
                         };
                     },
@@ -418,71 +430,6 @@ impl BybitClient {
 
         Ok(handler)
     }
-
-    // pub async fn cancel(&self, category: String, order_id: String) -> Result<(), String> {
-    //     let res: ApiOrderResponse = match self
-    //         .client
-    //         .post(
-    //             "/v5/order/cancel",
-    //             Some(json!({
-    //                 "category": category,
-    //                 "symbol": self.symbol.clone(),
-    //                 "orderLinkId": order_id
-    //             })),
-    //             [BybitOption::HttpAuth(BybitHttpAuth::V3AndAbove)],
-    //         )
-    //         .await
-    //     {
-    //         Ok(res) => res,
-    //         Err(e) => return Err(e.to_string()),
-    //     };
-    //     if res.ret_code != 0 {
-    //         return Err(res.ret_msg);
-    //     }
-
-    //     Ok(())
-    // }
-
-    // pub async fn place_order(
-    //     &self,
-    //     category: String,
-    //     order_id: String,
-    //     side: Side,
-    //     price: f64,
-    //     qty: f64,
-    //     is_post_only: bool,
-    // ) -> Result<String, String> {
-    //     let place_side = match side {
-    //         Side::Ask => "Sell",
-    //         Side::Bid => "Buy",
-    //     };
-
-    //     let res: ApiOrderResponse = match self
-    //         .client
-    //         .post(
-    //             "/v5/order/create",
-    //             Some(json!({
-    //                 "category": category,
-    //                 "symbol": self.symbol.clone(),
-    //                 "orderLinkId": order_id,
-    //                 "side": place_side,
-    //                 "price": price,
-    //                 "qty": qty,
-    //                 "timeInForce": if is_post_only { "PostOnly" } else { "GTC" }
-    //             })),
-    //             [BybitOption::HttpAuth(BybitHttpAuth::V3AndAbove)],
-    //         )
-    //         .await
-    //     {
-    //         Ok(res) => res,
-    //         Err(e) => return Err(e.to_string()),
-    //     };
-    //     if res.ret_code != 0 {
-    //         return Err(res.ret_msg);
-    //     }
-
-    //     Ok(res.result.order_link_id)
-    // }
 }
 
 pub async fn instruments(category: String) -> Result<Vec<Instrument>, String> {

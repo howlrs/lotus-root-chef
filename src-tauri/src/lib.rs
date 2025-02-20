@@ -1,4 +1,4 @@
-use log::{error, trace};
+use log::{debug, error, trace};
 use std::env;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use tauri::State;
 
 use crate::funcs::task::Log;
+use crate::funcs::utils;
 use crate::target::exchange::{get_rest_instruments, get_rest_ticker_info, ExchangeName};
 
 mod board;
@@ -52,7 +53,7 @@ impl Workers {
                     if e.is_cancelled() {
                         Ok(())
                     } else {
-                        trace!("error: {:?}", e);
+                        error!("error: {:?}", e);
                         Err(e)
                     }
                 }
@@ -72,7 +73,7 @@ async fn start_controller(
         match w.controller.ok() {
             Ok(_) => (),
             Err(e) => {
-                return Err(err_response_handler(
+                return Err(utils::err_response_handler(
                     "controller is not ok, please check value",
                     e,
                 ));
@@ -81,7 +82,7 @@ async fn start_controller(
 
         // すでに実行してるWorkerがあれば停止
         if let Some(mut workers) = w.workers.take() {
-            println!("workers[{}] is done, abort_all", workers.handles.len());
+            debug!("workers[{}] is done, abort_all", workers.handles.len());
             workers.abort_all().await.unwrap();
             w.workers = None;
         }
@@ -126,7 +127,7 @@ async fn stop_controller(
         let workers = match w.workers.take() {
             Some(v) => v,
             None => {
-                return Err(err_response_handler(
+                return Err(utils::err_response_handler(
                     "workers is not found, please ",
                     "runner is not running, please start runner",
                 ));
@@ -138,18 +139,14 @@ async fn stop_controller(
 
     // abort all workers
     match workers.abort_all().await {
-        Ok(v) => {
-            trace!("done: {:?}", v);
+        Ok(_) => {
             controller.is_running = false;
             Ok(controller)
         }
-        Err(e) => {
-            error!("error: {:?}", e);
-            Err(err_response_handler(
-                "abort is failed, workers is not found",
-                &e.to_string(),
-            ))
-        }
+        Err(e) => Err(utils::err_response_handler(
+            "abort is failed, workers is not found",
+            &e.to_string(),
+        )),
     }
 }
 
@@ -162,7 +159,7 @@ async fn post_controller(
     let controller: funcs::task::Controller = match serde_json::from_value(value.clone()) {
         Ok(v) => v,
         Err(e) => {
-            return Err(err_response_handler(
+            return Err(utils::err_response_handler(
                 "controller is invalid",
                 &e.to_string(),
             ));
@@ -172,7 +169,7 @@ async fn post_controller(
     match controller.ok() {
         Ok(_) => (),
         Err(e) => {
-            return Err(err_response_handler(
+            return Err(utils::err_response_handler(
                 "controller is not ok, please check value",
                 e,
             ));
@@ -204,7 +201,7 @@ async fn put_controller(
 ) -> Result<Value, Value> {
     // value bind to Controller
     let controller: funcs::task::Controller = serde_json::from_value(value).unwrap();
-    trace!("{:?}", controller);
+    debug!("put data: {:?}", controller);
 
     {
         let mut w = state.write().await;
@@ -230,7 +227,7 @@ async fn get_instruments(exchange_name: ExchangeName) -> Result<Value, Value> {
     let instruments = match get_rest_instruments(exchange_name.clone()).await {
         Ok(v) => v,
         Err(e) => {
-            return Err(err_response_handler(
+            return Err(utils::err_response_handler(
                 "instruments is not found",
                 &e.to_string(),
             ))
@@ -244,7 +241,12 @@ async fn get_instruments(exchange_name: ExchangeName) -> Result<Value, Value> {
 async fn get_ticker(exchange_name: ExchangeName, symbol: String) -> Result<Value, Value> {
     let ticker = match get_rest_ticker_info(exchange_name.clone(), symbol.clone()).await {
         Ok(v) => v,
-        Err(e) => return Err(err_response_handler("ticker is not found", &e.to_string())),
+        Err(e) => {
+            return Err(utils::err_response_handler(
+                "ticker is not found",
+                &e.to_string(),
+            ))
+        }
     };
 
     Ok(json!(ticker))
@@ -281,8 +283,7 @@ async fn clear_logger(state: State<'_, Arc<RwLock<AppState>>>) -> Result<(), Val
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env::set_var("RUST_LOG", "info");
-    env_logger::init();
+    utils::init_logger("output.log");
 
     let use_state = Arc::new(RwLock::new(AppState {
         controller: funcs::task::Controller::default(),
@@ -308,8 +309,4 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-fn err_response_handler(msg: &str, cause: &str) -> Value {
-    json!({"msg": msg, "cause": cause})
 }

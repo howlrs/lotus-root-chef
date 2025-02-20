@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use log::trace;
+use log::info;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -61,6 +61,7 @@ impl Orderboard {
             None => 0.0,
         };
 
+        info!("best prices: ask={}, bid={}", ask_price, bid_price);
         (ask_price, bid_price)
     }
 
@@ -217,6 +218,12 @@ impl Orderboard {
                     return (0.0, false);
                 }
 
+                info!(
+                    "ask filtered books: {}, {:?}",
+                    filtered.len(),
+                    filtered.clone()
+                );
+
                 // 昇順で最初の要素を出力する
                 // 配列は昇順でソートされているため、最初の要素が最小値
                 match filtered.first() {
@@ -228,7 +235,7 @@ impl Orderboard {
                         }
 
                         // 経過時間を表示
-                        trace!("board search elapsed: {:?}", start.elapsed());
+                        info!("board search elapsed: {:?}", start.elapsed());
 
                         (price, true)
                     }
@@ -248,6 +255,12 @@ impl Orderboard {
                     return (0.0, false);
                 }
 
+                info!(
+                    "bid filtered books: {}, {:?}",
+                    filtered.len(),
+                    filtered.clone()
+                );
+
                 // 昇順で最後の要素を出力する
                 // 配列は昇順でソートされているため、最後の要素が最大値
                 match filtered.last() {
@@ -259,7 +272,7 @@ impl Orderboard {
                         }
 
                         // 経過時間を表示
-                        trace!("board search elapsed: {:?}", start.elapsed());
+                        info!("board search elapsed: {:?}", start.elapsed());
 
                         (price, true)
                     }
