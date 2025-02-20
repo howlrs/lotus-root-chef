@@ -99,7 +99,7 @@ impl Orderboard {
         }
 
         {
-            let mut w = self.bid.write().unwrap();
+            let mut w = self.ask.write().unwrap();
             w.clear();
             *w = new_book;
         }
