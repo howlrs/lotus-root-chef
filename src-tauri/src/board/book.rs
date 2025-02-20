@@ -199,9 +199,14 @@ impl Orderboard {
 
         match filter_config.side {
             BookSide::Ask => {
-                let abook = self.ask.read().unwrap();
+                let abook = {
+                    let book = self.ask.read().unwrap();
+                    book.clone()
+                };
 
+                // 指定条件のフィルタリング適用後の板を取得
                 let filtered = abook.iter().filter(is_condition).collect::<Vec<_>>();
+                // フィルタリング後の板が空の場合は 0 を返す
                 if filtered.is_empty() {
                     return (0.0, false);
                 }
@@ -210,10 +215,14 @@ impl Orderboard {
                 // 配列は昇順でソートされているため、最初の要素が最小値
                 match filtered.first() {
                     Some((price, book)) => {
+                        // BTreeMapのキーが保持するBook.Priceと値が一致するか確認する
                         let price = price.0;
                         if price != book.price {
                             return (0.0, false);
                         }
+
+                        // 経過時間を表示
+                        trace!("board search elapsed: {:?}", start.elapsed());
 
                         (price, true)
                     }
@@ -221,9 +230,14 @@ impl Orderboard {
                 }
             }
             BookSide::Bid => {
-                let bbook = self.bid.read().unwrap();
+                let bbook = {
+                    let book = self.bid.read().unwrap();
+                    book.clone()
+                };
 
+                // 指定条件のフィルタリング適用後の板を取得
                 let filtered = bbook.iter().filter(is_condition).collect::<Vec<_>>();
+                // フィルタリング後の板が空の場合は 0 を返す
                 if filtered.is_empty() {
                     return (0.0, false);
                 }
@@ -232,6 +246,7 @@ impl Orderboard {
                 // 配列は昇順でソートされているため、最後の要素が最大値
                 match filtered.last() {
                     Some((price, book)) => {
+                        // BTreeMapのキーが保持するBook.Priceと値が一致するか確認する
                         let price = price.0;
                         if price != book.price {
                             return (0.0, false);
