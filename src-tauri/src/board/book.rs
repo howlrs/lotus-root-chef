@@ -285,10 +285,6 @@ impl Book {
     fn is_remove(&self) -> bool {
         self.size.is_nan() || self.size == 0.0
     }
-
-    pub fn is_large(&self, size: f64) -> bool {
-        self.size > size
-    }
 }
 
 #[cfg(test)]
