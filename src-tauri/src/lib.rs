@@ -69,11 +69,14 @@ async fn start_controller(
 ) -> Result<funcs::task::Controller, Value> {
     let (cloned_controller, cloned_logger) = {
         let mut w = state.write().await;
-        if !w.controller.is_ok() {
-            return Err(err_response_handler(
-                "controller is not ok, please check value",
-                json!(w.controller).as_str().unwrap(),
-            ));
+        match w.controller.ok() {
+            Ok(_) => (),
+            Err(e) => {
+                return Err(err_response_handler(
+                    "controller is not ok, please check value",
+                    e,
+                ));
+            }
         }
 
         // すでに実行してるWorkerがあれば停止
@@ -163,19 +166,12 @@ async fn post_controller(
         }
     };
 
-    if !controller.is_ok() {
-        // 更新が行われない場合はエラー
-        // - controllerが実行中の場合
-        if controller.is_running {
+    match controller.ok() {
+        Ok(_) => (),
+        Err(e) => {
             return Err(err_response_handler(
-                "controller is running, please stop controller",
-                "runner is running, please stop_controller",
-            ));
-        } else {
-            // - controllerが不正な値の場合
-            return Err(err_response_handler(
-                "controller is not update, please check value",
-                &value.to_string(),
+                "controller is not ok, please check value",
+                e,
             ));
         }
     }

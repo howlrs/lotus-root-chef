@@ -25,14 +25,18 @@ pub struct Controller {
 }
 
 impl Controller {
-    pub fn is_ok(&self) -> bool {
+    pub fn ok(&self) -> Result<(), &str> {
         if self.is_running {
-            return false;
-        } else if self.exchange.is_ok() && self.board.is_ok() && self.order.is_ok() {
-            return true;
+            Err("already running")
+        } else if !self.exchange.is_ok() {
+            Err("exchange setting is empty")
+        } else if !self.board.is_ok() {
+            Err("board setting is empty")
+        } else if !self.order.is_ok() {
+            Err("order setting is empty")
+        } else {
+            Ok(())
         }
-
-        false
     }
 }
 
