@@ -20,10 +20,15 @@ const Logger = () => {
             const data = response as Log[];
             console.log(data);
 
-            setLogger(data);
+            // 追加する
+            setLogger((prev) => [...prev, ...data]);
         } catch (error) {
             console.error(error);
         }
+    };
+
+    const clear = async () => {
+        setLogger([]);
     };
 
     const onClose = () => {
@@ -46,12 +51,8 @@ const Logger = () => {
 
     return (
         <>
-            {
-                logger.length > 0 ? (
-                    <Button type="link" size="small" onClick={onOpen}>open log</Button>
+            <Button type="link" size="small" onClick={onOpen}>open log</Button>
 
-                ) : null
-            }
             <Spin spinning={loading}>
                 <Drawer title="History" onClose={onClose} open={open} closable={false}>
                     <ul>
@@ -59,6 +60,8 @@ const Logger = () => {
                             <li key={index}>{formatTime(item.timestamp)}|[{item.level}]: {item.message}</li>
                         ))}
                     </ul>
+
+                    <Button type="primary" onClick={clear}>Clear</Button>
                 </Drawer>
 
             </Spin>
