@@ -169,7 +169,7 @@ impl Orderboard {
         bbook.insert(OrderedFloat(book.price), book);
     }
 
-    pub fn f_to_book(&self, price: f64, size: f64) -> Book {
+    pub fn f64_to_book(&self, price: f64, size: f64) -> Book {
         Book { price, size }
     }
 
