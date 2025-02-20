@@ -20,7 +20,7 @@ pub struct Config {
 
 impl Config {
     pub fn is_ok(&self) -> bool {
-        self.hight > 0.0 && self.low >= 0.0 && self.size > 0.0
+        self.hight > 0.0 && self.low >= 0.0 && self.low < self.hight && self.size > 0.0
     }
 
     pub fn is_range(&self, book: &Book) -> bool {
