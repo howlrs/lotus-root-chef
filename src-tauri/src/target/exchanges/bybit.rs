@@ -77,7 +77,7 @@ impl OrderClient for BybitClient {
     }
 
     async fn order(&self, params: &OrderParams) -> Result<String, String> {
-        let order_id = params.order_id.as_ref().map(|s| s.as_str()).unwrap_or("");
+        let order_id = params.order_id.as_deref().unwrap_or("");
         let oside = match params.side {
             OrderSide::Buy => "Buy",
             OrderSide::Sell => "Sell",
