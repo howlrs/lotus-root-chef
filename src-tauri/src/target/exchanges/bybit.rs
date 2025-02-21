@@ -13,7 +13,9 @@ use crate::{
         bybit_models::{
             ApiDefaultResponse, ApiOrderResponse, ApiOrderbook, InstrumentInfo, TickerInfo,
         },
-        models::{DataType, Instrument, OrderClient, OrderSide, Orderboard, Position, Ticker},
+        models::{
+            DataType, Instrument, OrderClient, OrderParams, OrderSide, Orderboard, Position, Ticker,
+        },
     },
 };
 
@@ -40,13 +42,10 @@ impl OrderClient for BybitClient {
         let mut client = Client::new();
         client.update_default_option(BybitOption::Key(key));
         client.update_default_option(BybitOption::Secret(secret));
-        let client = client.clone();
-
-        let category = category.unwrap_or("spot".to_string());
 
         BybitClient {
-            client,
-            category,
+            client: client.clone(),
+            category: category.unwrap_or("spot".to_string()),
             symbol,
         }
     }
@@ -77,20 +76,17 @@ impl OrderClient for BybitClient {
         Ok(())
     }
 
-    async fn order(
-        &self,
-        order_id: Option<String>,
-        side: OrderSide,
-        price: f64,
-        qty: f64,
-        is_post_only: bool,
-    ) -> Result<String, String> {
-        let order_id = order_id.unwrap_or("".to_string());
-        let oside = match side {
+    async fn order(&self, params: &OrderParams) -> Result<String, String> {
+        let order_id = params.order_id.as_ref().map(|s| s.as_str()).unwrap_or("");
+        let oside = match params.side {
             OrderSide::Buy => "Buy",
             OrderSide::Sell => "Sell",
         };
-        let tif = if is_post_only { "PostOnly" } else { "GTC" };
+        let tif = if params.is_post_only {
+            "PostOnly"
+        } else {
+            "GTC"
+        };
 
         let res: ApiOrderResponse = match self
             .client
@@ -101,8 +97,8 @@ impl OrderClient for BybitClient {
                     "symbol": self.symbol.clone(),
                     "orderLinkId": order_id,
                     "side": oside,
-                    "price": price,
-                    "qty": qty,
+                    "price": params.price,
+                    "qty": params.qty,
                     "timeInForce": tif,
                 })),
                 [BybitOption::HttpAuth(BybitHttpAuth::V3AndAbove)],
@@ -200,7 +196,7 @@ impl BybitClient {
                         )) {
                             Ok(()) => (),
                             Err(e) => {
-                                error!("error: {}", e);
+                                error!("ticker send error: {}", e);
                             }
                         };
                     },
@@ -317,7 +313,7 @@ impl BybitClient {
                         )) {
                             Ok(()) => (),
                             Err(e) => {
-                                error!("error: {}", e);
+                                error!("orderboard send error: {}", e);
                             }
                         };
                     },
@@ -400,7 +396,7 @@ impl BybitClient {
                         match tx_ws_position.try_send(use_positions) {
                             Ok(()) => (),
                             Err(e) => {
-                                error!("error: {}", e);
+                                error!("position send error: {}", e);
                             }
                         };
                     },

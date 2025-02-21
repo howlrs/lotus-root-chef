@@ -30,7 +30,7 @@ impl Workers {
                     if e.is_cancelled() {
                         Ok(())
                     } else {
-                        error!("error: {:?}", e);
+                        error!("abort error: {:?}", e);
                         Err(e)
                     }
                 }

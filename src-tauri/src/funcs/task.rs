@@ -1,24 +1,31 @@
 use core::panic;
+use std::env;
 use std::future::pending;
 use std::sync::Arc;
+use std::time::Instant;
 
-use log::{error, info, log_enabled, trace};
+use log::{ info, log_enabled, trace};
 use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 use tokio::task::{spawn, JoinError, JoinHandle};
 
 use crate::board;
 use crate::funcs::client::{Controller, Log, Logger};
+use crate::funcs::position;
 use crate::target::exchanges::models::{
-    BookSide, DataType, Orderboard, Position, Ticker, ToExchange,
+    BookSide, DataType, OrderParams, Orderboard, Position, Ticker, ToExchange
 };
+
 pub async fn runner(
     controller: Arc<RwLock<Controller>>,
     logger: Arc<RwLock<Logger>>,
 ) -> Result<Vec<JoinHandle<()>>, JoinError> {
+    // テストの場合注文の処理をスキップする
+    let is_test = env::var("IS_TEST").unwrap_or_default() == "true";
+
     // Runner内の処理を並列に実行するためのハンドル
     let mut handles = vec![];
-// Runner内の処理の一つが終了または失敗したら、他の処理を停止するためのハンドル
-let cancel_handle = tokio_util::sync::CancellationToken::new();
+    // Runner内の処理の一つが終了または失敗したら、他の処理を停止するためのハンドル
+    let cancel_handle = tokio_util::sync::CancellationToken::new();
 
     // 当関数内のみで使用する変数を生成
     // 当関数はControllerが更新されるごとに再生成される
@@ -90,8 +97,10 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
         loop {
             tokio::select! {
                 Some(pos) = rx_ws_position.recv() => {
-                    let mut w = cloned_positions.write().await;
-                    *w = pos.clone();
+                    {
+                        let mut w = cloned_positions.write().await;
+                        *w = pos.clone();
+                    }
 
                     info!("position: {:?}", pos);
                 }
@@ -102,10 +111,9 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
         }
     }));
 
-    let cloned_board = board.clone();
-    let cloned_order_manage = order_manage.clone();
-    let cloned_board_config = board_config.clone();
-    let cloned_logger = logger.clone();
+    let (cloned_board, cloned_order_manage, cloned_board_config, cloned_logger) = {
+        (board.clone(), order_manage.clone(),  board_config.clone(), logger.clone())
+    };
     handles.push(spawn(async move {
         // WebSocketの送信
         loop {
@@ -115,38 +123,42 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
                     match books.data_type {
                         DataType::Snapshot => {
                             // Arc, Lockの粒度は親とする
-                            let mut w = cloned_board.write().await;
-                            w.extend(BookSide::Bid, books.b);
-                            w.extend(BookSide::Ask, books.a);
+                            // 板を差し替える
+                            let r = cloned_board.read().await;
+                            r.replace(BookSide::Bid, books.b);
+                            r.replace(BookSide::Ask, books.a);
                         }
                         DataType::UpdateDelta => {
-                            let mut w = cloned_board.write().await;
-                            w.update_delta(BookSide::Bid, books.b);
-                            w.update_delta(BookSide::Ask, books.a);
-                        }
-                        DataType::UpdateFull => {
-                            // Arc, Lockの粒度は親とする
-                            let mut w = cloned_board.write().await;
-                            w.extend(BookSide::Bid, books.b);
-                            w.extend(BookSide::Ask, books.a);
+                            // size: 0の場合は削除
+                            // 同priceは上書き
+                            let r = cloned_board.read().await;
+                            r.update_delta(BookSide::Bid, books.b);
+                            r.update_delta(BookSide::Ask, books.a);
                         }
                     }
 
+                    {
+                        let mut w = cloned_board.write().await;
+                        w.update_at();
+                    }
+
                     // env_logger traceであれば表示
-                    if log_enabled!(log::Level::Trace)  {
+                    if log_enabled!(log::Level::Info)  {
                         let (best_ask, best_bid) = {
                             let r = cloned_board.read().await;
                             r.best_prices()
                         };
 
-                        trace!("mid:      {}", (best_ask + best_bid)/ 2.0);
+                        info!("mid: {}", (best_ask + best_bid)/ 2.0);
                     };
 
                     // 対象の板を検出する
                     // - 指定価格内
                     // - 指定サイズ以上
                     // - 自己注文価格以外
+                    let start = Instant::now();   
                     let (target_price, is_there) = {
+
                         let prev_order = {
                             let r = cloned_order_manage.lock().await;
                             r.clone()
@@ -157,27 +169,28 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
                         };
                         search_target_board.target_book(&cloned_board_config, prev_order.price)
                     };
+                    info!("search target price elapsed: {:?}", start.elapsed());
 
                     if !is_there {
                         continue;
                     }
 
                     trace!("target_price before: {:?}", target_price);
-                         match tx_order.send(target_price).await {
-                            Ok(_) => {
-                                continue;
-                            }
-                            Err(e) => {
-                                    let mut w = cloned_logger.write().await;
-                                    w.add(Log {
-                                        level: "error".to_string(),
-                                        message: format!("board send error: {:?}", e),
-                                        timestamp: chrono::Local::now().to_string(),
-                                    });
+                    match tx_order.send(target_price).await {
+                        Ok(_) => {
+                            continue;
+                        }
+                        Err(e) => {
+                                let mut w = cloned_logger.write().await;
+                                w.add(Log {
+                                    level: "error".to_string(),
+                                    message: format!("board send error: {:?}", e),
+                                    timestamp: chrono::Local::now().to_string(),
+                                });
 
-                                continue;
-                            }
-                        };
+                            continue;
+                        }
+                    };
                 }
                 _ = pending::<()>() => {
                     // handle.abort()を待つ
@@ -187,16 +200,16 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
     }));
 
     // 設定情報
-    let cloned_cancel_handle = cancel_handle.clone();
-    let cloned_exchange = exchange_config.name.clone();
-    let cloned_target_symbol = target_symbol.clone();
-    // mut スレッド間で共有する更新データ
-    let cloned_order_manage = order_manage.clone();
-    let cloned_positions = positions.clone();
-    let cloned_logger = logger.clone();
-    // チャンネル
-    let cloned_fetch_rest_position = fetch_rest_position.clone();
-    let rx_rest_position = tx_rest_position.subscribe();
+    let (cloned_cancel_handle, cloned_exchange, cloned_target_symbol, cloned_order_manage, cloned_positions, cloned_logger, cloned_fetch_rest_position, rx_rest_position) = (
+        cancel_handle.clone(),
+        exchange_config.name.clone(),
+        target_symbol.clone(),
+        order_manage.clone(),
+        positions.clone(),
+        logger.clone(),
+        fetch_rest_position.clone(),
+        tx_rest_position.subscribe(),
+    );
     handles.push(spawn(async move {
         let set_order_link_id = format!("{}_{}_board4rs", cloned_exchange.clone().as_str(), cloned_target_symbol.clone());
 
@@ -218,7 +231,9 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
                     // - cancel: order_idがある場合、キャンセルする
                     if let Some(order_id) = order_id.clone() {
                         trace!("cancel by order id: {:?}", order_id);
-                        exchange_client.cancel_order(order_id.clone()).await.unwrap();
+                        if !is_test {
+                            exchange_client.cancel_order(order_id.clone()).await.unwrap();
+                        }
                     }
 
 
@@ -233,7 +248,7 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
 
                         // 自己注文の価格と同値であれば、注文しない
                         // Boardでもチェックして、二重チェック
-                        if prev_order.price.unwrap_or(0.0) == target_price {
+                        if prev_order.price.unwrap_or_default() == target_price {
                             info!("order and target_price are same price: {}", target_price);
                             continue;   
                         }
@@ -241,14 +256,14 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
                         // Websocket非実装取引所の場合、ポジションは空であるため
                         // REST APIで取得する
                         let resubscribed_positions = rx_rest_position.resubscribe();
-                        let temp = get_positions(cloned_positions.clone(), cloned_fetch_rest_position.clone(),resubscribed_positions).await;
+                        let temp = position::get_positions(cloned_positions.clone(), cloned_fetch_rest_position.clone(),resubscribed_positions).await;
 
                         // 先注文があれば、部分約定の可能性がある
                         // 建玉の確認を行い、指定枚数以上の約定を確認する
                         // 建玉がなければ、注文数量をそのまま使用する
                         // 建玉があれば、部分約定の数量を差し引いた数量を使用する
                         if let Some(order_id) = order_id.clone() {
-                            let has_position = aggrigate_position(order_id.clone(), temp);
+                            let has_position = position::aggrigate_position(order_id.clone(), temp);
                             let remain = prev_order.qty - has_position.qty;
                             if remain <= 0.0 {
                                 // すべて約定している場合はログを追加
@@ -279,29 +294,49 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
 
                     // - order: 新規注文または再注文を行う
                     // 約定が指定サイズ以上であれば、再注文前にほか全ての処理を終了する
-                    match exchange_client.place_order(
+                    let order_params = OrderParams {
                         // 同じ注文IDを使用する
-                        Some(set_order_link_id.clone()),
-                        order_config.side.clone(),
-                        target_price,
-                        ramaining_qty_as_order_qty,
-                        order_config.is_post_only,
-                    ).await {
+                        order_id: Some(set_order_link_id.clone()),
+                        side: order_config.side.clone(),
+                        price: target_price,
+                        qty: ramaining_qty_as_order_qty,
+                        is_post_only: order_config.is_post_only,
+                    };
+                    if is_test {
+                        info!("[test] order created, params: {:?}", order_params.clone());
+                        let mut w = cloned_order_manage.lock().await;
+                        w.set_order(order_params.clone().order_id.unwrap().clone());
+
+                        let mut w = cloned_logger.write().await;
+                        w.add(Log {
+                            level: "info".to_string(),
+                            message: format!("[test] order created, params: {:?}", order_params.clone()),
+                            timestamp: chrono::Local::now().to_string(),
+                        });
+                        continue;
+                    }
+
+                    match exchange_client.place_order(&order_params.clone()).await {
                         Ok(latest_order_id) => {
                             // - set_order: 注文ID及び最終注文時間を更新する
-                            let mut w = cloned_order_manage.lock().await;
-                            w.set_order(latest_order_id.clone());
+                            {
+                                let mut w = cloned_order_manage.lock().await;
+                                w.set_order(latest_order_id.clone());
+                            }
 
                             let mut w = cloned_logger.write().await;
                             w.add(Log {
                                 level: "info".to_string(),
-                                message: format!("order created order id: {:?}, price: {}, size: {}", latest_order_id,
-                                target_price,
-                                ramaining_qty_as_order_qty),
+                                message: format!("order created, params: {:?}", order_params),
                                 timestamp: chrono::Local::now().to_string(),
                             });
                         }
                         Err(e) => {
+                                {
+                                    let mut w = cloned_order_manage.lock().await;
+                                    w.set_error_order();
+                                }
+
                                 let mut w = cloned_logger.write().await;
                                 w.add(Log {
                                     level: "error".to_string(),
@@ -355,48 +390,3 @@ let cancel_handle = tokio_util::sync::CancellationToken::new();
     Ok(handles)
 }
 
-// ポジションを取得する
-// Websocket非実装の場合ポジションは空であるため
-// ポジションがない場合はRestRequestを送信し、取得する
-async fn get_positions(
-    positions: Arc<RwLock<Vec<Position>>>,
-    tx: mpsc::Sender<()>,
-    mut rx: broadcast::Receiver<Vec<Position>>,
-) -> Vec<Position> {
-    let r = positions.read().await;
-
-    if !r.is_empty() {
-        r.clone()
-    } else {
-        // RestRequestを送信
-        tx.send(()).await.unwrap();
-
-        // RestRequestの受信を待機
-        match rx.recv().await {
-            Ok(pos) => pos,
-            Err(e) => {
-                error!("get_positions error: {:?}", e);
-                vec![]
-            }
-        }
-    }
-}
-
-// 指定した注文IDのポジションを集計する
-fn aggrigate_position(order_id: String, positions: Vec<Position>) -> Position {
-    let mut pos = Position::default();
-    if positions.is_empty() {
-        return pos;
-    }
-
-    for p in positions {
-        if order_id != p.order_id {
-            continue;
-        }
-
-        pos.qty += p.qty;
-        pos.price += p.price;
-    }
-
-    pos
-}

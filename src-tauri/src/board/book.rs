@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use log::info;
+use log::{info, log_enabled};
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -61,7 +61,7 @@ impl Orderboard {
             None => 0.0,
         };
 
-        info!("best prices: ask={}, bid={}", ask_price, bid_price);
+        info!("best prices: [ask: {}, bid: {}]", ask_price, bid_price);
         (ask_price, bid_price)
     }
 
@@ -86,14 +86,19 @@ impl Orderboard {
         }
     }
 
-    pub fn extend(&mut self, target_side: BookSide, book: Vec<Book>) -> DateTime<Utc> {
+    pub fn update_at(&mut self) -> DateTime<Utc> {
+        self.update_at = Utc::now();
+        self.update_at
+    }
+
+    pub fn replace(&self, target_side: BookSide, book: Vec<Book>) {
         match target_side {
-            BookSide::Ask => self.extend_ask(book),
-            BookSide::Bid => self.extend_bid(book),
+            BookSide::Ask => self.replace_ask(book),
+            BookSide::Bid => self.replace_bid(book),
         }
     }
 
-    pub fn extend_ask(&mut self, ask: Vec<Book>) -> DateTime<Utc> {
+    pub fn replace_ask(&self, ask: Vec<Book>) {
         let mut new_book = BTreeMap::new();
         for book in ask {
             new_book.insert(OrderedFloat(book.price), book);
@@ -104,12 +109,9 @@ impl Orderboard {
             w.clear();
             *w = new_book;
         }
-
-        self.update_at = Utc::now();
-        self.update_at
     }
 
-    pub fn extend_bid(&mut self, bid: Vec<Book>) -> DateTime<Utc> {
+    pub fn replace_bid(&self, bid: Vec<Book>) {
         let mut new_book = BTreeMap::new();
         for book in bid {
             new_book.insert(OrderedFloat(book.price), book);
@@ -120,12 +122,9 @@ impl Orderboard {
             w.clear();
             *w = new_book;
         }
-
-        self.update_at = Utc::now();
-        self.update_at
     }
 
-    pub fn update_delta(&mut self, target_side: BookSide, books: Vec<Book>) -> DateTime<Utc> {
+    pub fn update_delta(&self, target_side: BookSide, books: Vec<Book>) {
         let mut target_book = match target_side {
             BookSide::Ask => self.ask.write().unwrap(),
             BookSide::Bid => self.bid.write().unwrap(),
@@ -139,22 +138,16 @@ impl Orderboard {
 
             target_book.insert(OrderedFloat(book.price), book);
         }
-
-        self.update_at = Utc::now();
-        self.update_at
     }
 
-    pub fn push(&mut self, target_side: BookSide, book: Book) -> DateTime<Utc> {
+    pub fn push(&self, target_side: BookSide, book: Book) {
         match target_side {
             BookSide::Ask => self.push_to_ask(book),
             BookSide::Bid => self.push_to_bid(book),
         }
-
-        self.update_at = Utc::now();
-        self.update_at
     }
 
-    pub fn push_to_ask(&mut self, book: Book) {
+    pub fn push_to_ask(&self, book: Book) {
         let mut abook = self.ask.write().unwrap();
 
         if book.is_remove() {
@@ -165,7 +158,7 @@ impl Orderboard {
         abook.insert(OrderedFloat(book.price), book);
     }
 
-    pub fn push_to_bid(&mut self, book: Book) {
+    pub fn push_to_bid(&self, book: Book) {
         let mut bbook = self.bid.write().unwrap();
 
         if book.is_remove() {
@@ -193,7 +186,6 @@ impl Orderboard {
         filter_config: &Config,
         prev_own_order_price: Option<f64>,
     ) -> (f64, bool) {
-        let start = Instant::now();
         // 複数の filter を連結したクロージャ
         let is_condition = |&(_, book): &(&OrderedFloat<f64>, &Book)| {
             filter_config.is_large(book)
@@ -212,17 +204,21 @@ impl Orderboard {
                 };
 
                 // 指定条件のフィルタリング適用後の板を取得
-                let filtered = abook.iter().filter(is_condition).collect::<Vec<_>>();
+                let filtered: Vec<(&OrderedFloat<f64>, &Book)> =
+                    abook.iter().filter(is_condition).collect();
                 // フィルタリング後の板が空の場合は 0 を返す
                 if filtered.is_empty() {
                     return (0.0, false);
                 }
 
-                info!(
-                    "ask filtered books: {}, {:?}",
-                    filtered.len(),
-                    filtered.clone()
-                );
+                if log_enabled!(log::Level::Info) {
+                    info!(
+                        "ask filtered books: {} to {}, {:?}",
+                        abook.len(),
+                        filtered.len(),
+                        filtered.clone()
+                    );
+                }
 
                 // 昇順で最初の要素を出力する
                 // 配列は昇順でソートされているため、最初の要素が最小値
@@ -233,9 +229,6 @@ impl Orderboard {
                         if price != book.price {
                             return (0.0, false);
                         }
-
-                        // 経過時間を表示
-                        info!("board search elapsed: {:?}", start.elapsed());
 
                         (price, true)
                     }
@@ -249,30 +242,32 @@ impl Orderboard {
                 };
 
                 // 指定条件のフィルタリング適用後の板を取得
-                let filtered = bbook.iter().filter(is_condition).collect::<Vec<_>>();
+                let filtered: Vec<(&OrderedFloat<f64>, &Book)> =
+                    bbook.iter().filter(is_condition).collect();
                 // フィルタリング後の板が空の場合は 0 を返す
                 if filtered.is_empty() {
                     return (0.0, false);
                 }
 
-                info!(
-                    "bid filtered books: {}, {:?}",
-                    filtered.len(),
-                    filtered.clone()
-                );
+                if log_enabled!(log::Level::Info) {
+                    info!(
+                        "bid filtered books: {} to {}, {:?}",
+                        bbook.len(),
+                        filtered.len(),
+                        filtered.clone()
+                    );
+                }
 
                 // 昇順で最後の要素を出力する
                 // 配列は昇順でソートされているため、最後の要素が最大値
                 match filtered.last() {
                     Some((price, book)) => {
                         // BTreeMapのキーが保持するBook.Priceと値が一致するか確認する
+                        // 価格が0の場合は板が存在しないため、0を返す
                         let price = price.0;
-                        if price != book.price {
+                        if price != book.price || price == 0.0 {
                             return (0.0, false);
                         }
-
-                        // 経過時間を表示
-                        info!("board search elapsed: {:?}", start.elapsed());
 
                         (price, true)
                     }
@@ -331,7 +326,7 @@ mod tests {
             };
             books.push(Book::new(size, i as f64));
         }
-        board.extend_ask(books);
+        board.replace_ask(books);
 
         // Askサイドのテスト設定を作成します。価格範囲は[1.0, 150.0]、最小サイズは1.0です。
         let config = Config {
@@ -380,7 +375,7 @@ mod tests {
             };
             books.push(Book::new(size, i as f64));
         }
-        board.extend_bid(books);
+        board.replace_bid(books);
 
         // Askサイドのテスト設定を作成します。価格範囲は[1.0, 150.0]、最小サイズは1.0です。
         let config = Config {

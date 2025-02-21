@@ -96,4 +96,8 @@ impl OrderInfo {
         self.order_id = Some(order_id);
         self.latest_at = Some(chrono::Utc::now());
     }
+
+    pub fn set_error_order(&mut self) {
+        self.latest_at = Some(chrono::Utc::now());
+    }
 }

@@ -26,6 +26,15 @@ pub enum OrderSide {
     Sell,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct OrderParams {
+    pub order_id: Option<String>,
+    pub side: OrderSide,
+    pub price: f64,
+    pub qty: f64,
+    pub is_post_only: bool,
+}
+
 pub trait OrderClient {
     fn new_for_order_client(
         key: String,
@@ -35,14 +44,7 @@ pub trait OrderClient {
         symbol: String,
     ) -> Self;
     async fn cancel(&self, order_id: String) -> Result<(), String>;
-    async fn order(
-        &self,
-        order_id: Option<String>,
-        side: OrderSide,
-        price: f64,
-        qty: f64,
-        is_post_only: bool,
-    ) -> Result<String, String>;
+    async fn order(&self, params: &OrderParams) -> Result<String, String>;
 }
 
 // 複数の取引所情報を管理する型（enumで各取引所のオブジェクトを保持）
@@ -77,18 +79,9 @@ impl ToExchange {
         }
     }
 
-    pub async fn place_order(
-        &self,
-        order_id: Option<String>,
-        side: OrderSide,
-        price: f64,
-        qty: f64,
-        is_post_only: bool,
-    ) -> Result<String, String> {
+    pub async fn place_order(&self, params: &OrderParams) -> Result<String, String> {
         match self {
-            ToExchange::Bybit(client) => {
-                client.order(order_id, side, price, qty, is_post_only).await
-            } // ToExchange::Bitbank(client) => client.order(order_id, price, qty),
+            ToExchange::Bybit(client) => client.order(params).await, // ToExchange::Bitbank(client) => client.order(order_id, price, qty),
             _ => Ok("".to_string()),
         }
     }
@@ -131,7 +124,6 @@ pub enum DataType {
     #[default]
     Snapshot,
     UpdateDelta,
-    UpdateFull,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

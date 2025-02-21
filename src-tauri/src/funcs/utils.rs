@@ -10,9 +10,12 @@ pub fn err_response_handler(msg: &str, cause: &str) -> Value {
 }
 
 pub fn init_logger(output_filepath: &str) {
+    let is_test = std::env::var("IS_TEST").unwrap_or_default() == "true";
+
     // 環境変数 RUST_LOG の値を取得（未指定の場合は "debug" と仮定）
     let log_level = std::env::var("RUST_LOG").unwrap_or("debug".to_string());
-    let mut builder = Builder::from_default_env();
+    let mut builder =
+        Builder::from_env(env_logger::Env::default().default_filter_or(log_level.clone()));
 
     if log_level.eq_ignore_ascii_case("error") {
         println!("RUST_LOG is error");
@@ -28,4 +31,11 @@ pub fn init_logger(output_filepath: &str) {
 
     // Builder の設定後にログ初期化を実施
     builder.init();
+
+    // ログ出力のテスト
+    log::error!("error message, is_test: {}", is_test);
+    log::warn!("warn message, is_test: {}", is_test);
+    log::info!("info message, is_test: {}", is_test);
+    log::debug!("debug message, is_test: {}", is_test);
+    log::trace!("trace message, is_test: {}", is_test);
 }
