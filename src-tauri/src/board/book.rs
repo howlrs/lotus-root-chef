@@ -1,12 +1,11 @@
 use chrono::{DateTime, Utc};
-use log::{info, log_enabled};
+use log::info;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     str,
     sync::{Arc, RwLock},
-    time::Instant,
 };
 
 use crate::{board::filter::Config, target::exchanges::models::BookSide};
@@ -198,81 +197,37 @@ impl Orderboard {
 
         match filter_config.side {
             BookSide::Ask => {
-                let abook = {
-                    let book = self.ask.read().unwrap();
-                    book.clone()
-                };
+                // ロック取得、クローンせずに直接参照でイテレートする
+                // クローンすると非効率かつ速度が遅くなる
+                let abook = self.ask.read().unwrap();
 
-                // 指定条件のフィルタリング適用後の板を取得
-                let filtered: Vec<(&OrderedFloat<f64>, &Book)> =
-                    abook.iter().filter(is_condition).collect();
-                // フィルタリング後の板が空の場合は 0 を返す
-                if filtered.is_empty() {
-                    return (0.0, false);
-                }
-
-                if log_enabled!(log::Level::Info) {
-                    info!(
-                        "ask filtered books: {} to {}, {:?}",
-                        abook.len(),
-                        filtered.len(),
-                        filtered.clone()
-                    );
-                }
-
-                // 昇順で最初の要素を出力する
-                // 配列は昇順でソートされているため、最初の要素が最小値
-                match filtered.first() {
-                    Some((price, book)) => {
-                        // BTreeMapのキーが保持するBook.Priceと値が一致するか確認する
-                        let price = price.0;
-                        if price != book.price {
+                for (price, book) in abook.iter() {
+                    if is_condition(&(price, book)) {
+                        // キーと値が整合しているかチェック
+                        if price.0 == book.price && price.0 != 0.0 {
+                            // ログ出力はロック解放後に行っても問題がなければ、ここで行う
+                            return (price.0, true);
+                        } else {
                             return (0.0, false);
                         }
-
-                        (price, true)
                     }
-                    None => (0.0, false),
                 }
+                (0.0, false)
             }
             BookSide::Bid => {
-                let bbook = {
-                    let book = self.bid.read().unwrap();
-                    book.clone()
-                };
+                let bbook = self.bid.read().unwrap();
 
-                // 指定条件のフィルタリング適用後の板を取得
-                let filtered: Vec<(&OrderedFloat<f64>, &Book)> =
-                    bbook.iter().filter(is_condition).collect();
-                // フィルタリング後の板が空の場合は 0 を返す
-                if filtered.is_empty() {
-                    return (0.0, false);
-                }
-
-                if log_enabled!(log::Level::Info) {
-                    info!(
-                        "bid filtered books: {} to {}, {:?}",
-                        bbook.len(),
-                        filtered.len(),
-                        filtered.clone()
-                    );
-                }
-
-                // 昇順で最後の要素を出力する
-                // 配列は昇順でソートされているため、最後の要素が最大値
-                match filtered.last() {
-                    Some((price, book)) => {
-                        // BTreeMapのキーが保持するBook.Priceと値が一致するか確認する
-                        // 価格が0の場合は板が存在しないため、0を返す
-                        let price = price.0;
-                        if price != book.price || price == 0.0 {
+                // Bid は昇順になっているため、逆方向から探す
+                for (price, book) in bbook.iter().rev() {
+                    if is_condition(&(price, book)) {
+                        if price.0 == book.price && price.0 != 0.0 {
+                            return (price.0, true);
+                        } else {
                             return (0.0, false);
                         }
-
-                        (price, true)
                     }
-                    None => (0.0, false),
                 }
+                (0.0, false)
             }
         }
     }
@@ -312,7 +267,7 @@ mod tests {
         let expected_best_ask = 1.0;
 
         // 対象データの生成
-        let mut board = Orderboard::new();
+        let board = Orderboard::new();
         // 価格が [1.0, 2.0, ..., 100.0] の等差数列で100個のブックを生成します。
         let mut books = Vec::new();
         for i in price_min..=100 {
@@ -361,7 +316,7 @@ mod tests {
         let expected_best_bid = 100.0;
 
         // 対象データの生成
-        let mut board = Orderboard::new();
+        let board = Orderboard::new();
         // 価格が [1.0, 2.0, ..., 100.0] の等差数列で100個のブックを生成します。
         let mut books = Vec::new();
         for i in 1..=price_max {
