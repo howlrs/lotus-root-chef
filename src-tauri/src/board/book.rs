@@ -199,13 +199,15 @@ impl Orderboard {
             BookSide::Ask => {
                 // ロック取得、クローンせずに直接参照でイテレートする
                 // クローンすると非効率かつ速度が遅くなる
+                // why: ロック取得時間を短くするより、クローンコストが速度に悪影響を及ぼしていた例
                 let abook = self.ask.read().unwrap();
 
+                // 検索の該当配列を出力していたが、発見後即時返り値を生成する使用に変更
+                // 可読性が向上し、速度も向上する
                 for (price, book) in abook.iter() {
                     if is_condition(&(price, book)) {
                         // キーと値が整合しているかチェック
                         if price.0 == book.price && price.0 != 0.0 {
-                            // ログ出力はロック解放後に行っても問題がなければ、ここで行う
                             return (price.0, true);
                         } else {
                             return (0.0, false);
