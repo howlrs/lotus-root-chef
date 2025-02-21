@@ -119,34 +119,29 @@ pub async fn runner(
         loop {
             tokio::select! {
                 Some(books) = rx_ws_orderboard.recv() => {
+                    let mut update_board = cloned_board.write().await;
                     // Orderboardの更新
                     match books.data_type {
                         DataType::Snapshot => {
                             // Arc, Lockの粒度は親とする
                             // 板を差し替える
-                            let r = cloned_board.read().await;
-                            r.replace(BookSide::Bid, books.b);
-                            r.replace(BookSide::Ask, books.a);
+                            update_board.replace(BookSide::Bid, books.b);
+                            update_board.replace(BookSide::Ask, books.a);
                         }
                         DataType::UpdateDelta => {
                             // size: 0の場合は削除
                             // 同priceは上書き
-                            let r = cloned_board.read().await;
-                            r.update_delta(BookSide::Bid, books.b);
-                            r.update_delta(BookSide::Ask, books.a);
+                            update_board.update_delta(BookSide::Bid, books.b);
+                            update_board.update_delta(BookSide::Ask, books.a);
                         }
                     }
 
-                    {
-                        let mut w = cloned_board.write().await;
-                        w.update_at();
-                    }
+                    update_board.update_at();
 
                     // env_logger traceであれば表示
                     if log_enabled!(log::Level::Info)  {
                         let (best_ask, best_bid) = {
-                            let r = cloned_board.read().await;
-                            r.best_prices()
+                            update_board.best_prices()
                         };
 
                         info!("mid: {}", (best_ask + best_bid)/ 2.0);
@@ -158,16 +153,11 @@ pub async fn runner(
                     // - 自己注文価格以外
                     let start = Instant::now();   
                     let (target_price, is_there) = {
-
-                        let prev_order = {
+                        let prev_order_price = {
                             let r = cloned_order_manage.lock().await;
-                            r.clone()
+                            r.price
                         };
-                        let search_target_board = {
-                            let r = cloned_board.read().await;
-                            r.clone()
-                        };
-                        search_target_board.target_book(&cloned_board_config, prev_order.price)
+                        update_board.target_book(&cloned_board_config, prev_order_price)
                     };
                     info!("search target price elapsed: {:?}", start.elapsed());
 
