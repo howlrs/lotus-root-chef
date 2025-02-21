@@ -11,8 +11,10 @@
 
 ## Envs
 - RUST_LOG: ログレベルの出力選択, select -> [trace, debug, info, warn, error], default -> debug
+  - **trace** に設定すると詳細のログが出力されます。
+  - **info** に指定すると処理時間などが出力されます。
+  - **error** はデプロイ・ビルド時の設定値です。ログの出力先が指定ファイルへ変更されます。
 - OUTPUTLOGFILE: ログレベル[error]の出力ファイル先, select: any, default -> program_dir/output.log
-
 
 ## Supported Exchanges
 - Bybit: 取引所API板取得最大:500の価格帯で対応（探索範囲は狭い）
