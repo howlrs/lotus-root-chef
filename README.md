@@ -9,6 +9,10 @@
 デスクトップアプリが付随し、ローカルにて稼働します。指値速度はネットワーク(ping)に依存し、板探索はCPUに依存します。探索は価格板配列500でおおよそ10-50μs程度で、ping:20msかつAPI稼働通常時と仮定したとき取引所への板配置完了は100ms前後（取引所API稼働状態にも依ります）です。
 以下パラメータで探索、注文の設定が可能です。
 
+## Envs
+- RUST_LOG: ログレベルの出力選択, select -> [trace, debug, info, warn, error], default -> debug
+- OUTPUTLOGFILE: ログレベル[error]の出力ファイル先, select: any, default -> program_dir/output.log
+
 
 ## Supported Exchanges
 - Bybit: 取引所API板取得最大:500の価格帯で対応（探索範囲は狭い）

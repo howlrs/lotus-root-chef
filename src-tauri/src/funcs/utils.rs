@@ -11,7 +11,7 @@ pub fn err_response_handler(msg: &str, cause: &str) -> Value {
 
 pub fn init_logger(output_filepath: &str) {
     // 環境変数 RUST_LOG の値を取得（未指定の場合は "debug" と仮定）
-    let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "debug".to_string());
+    let log_level = std::env::var("RUST_LOG").unwrap_or("debug".to_string());
     let mut builder = Builder::from_default_env();
 
     if log_level.eq_ignore_ascii_case("error") {

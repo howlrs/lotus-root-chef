@@ -12,7 +12,13 @@ mod target;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    utils::init_logger("output.log");
+    {
+        // ログ出力先を設定（レベル[error]以上の場合はファイル出力）
+        // ローカルの場合はカレントディレクトリに出力
+        let output_filename = env::var("OUTPUT_LOGFILE").unwrap_or("output.log".to_string());
+        let output_filepath = env::current_dir().unwrap().join(output_filename);
+        utils::init_logger(output_filepath.to_str().unwrap());
+    };
 
     let use_state = Arc::new(RwLock::new(api::invokers::AppState {
         controller: client::Controller::default(),
