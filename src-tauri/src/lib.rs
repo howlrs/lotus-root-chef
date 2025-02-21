@@ -12,6 +12,8 @@ mod target;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    dotenv::from_path(".env.local").ok();
+
     {
         // ログ出力先を設定（レベル[error]以上の場合はファイル出力）
         // ローカルの場合はカレントディレクトリに出力
