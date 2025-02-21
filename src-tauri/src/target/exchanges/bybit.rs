@@ -175,19 +175,19 @@ impl BybitClient {
                         trace!("ticker raw data: {}", data);
 
                         let ltp = match data["lastPrice"].as_str() {
-                            Some(v) => v.parse::<f64>().unwrap(),
+                            Some(v) => v.parse::<f64>().unwrap_or_default(),
                             None => return,
                         };
                         let v24 = match data["volume24h"].as_str() {
-                            Some(v) => v.parse::<f64>().unwrap(),
+                            Some(v) => v.parse::<f64>().unwrap_or_default(),
                             None => return,
                         };
                         let bid = match data["bid1Price"].as_str() {
-                            Some(v) => v.parse::<f64>().unwrap(),
+                            Some(v) => v.parse::<f64>().unwrap_or_default(),
                             None => return,
                         };
                         let ask = match data["ask1Price"].as_str() {
-                            Some(v) => v.parse::<f64>().unwrap(),
+                            Some(v) => v.parse::<f64>().unwrap_or_default(),
                             None => return,
                         };
 
@@ -296,14 +296,14 @@ impl BybitClient {
                         let mut b = vec![];
                         for book in get_orderboards.a {
                             a.push(Book {
-                                price: book[0].parse().unwrap(),
-                                size: book[1].parse().unwrap(),
+                                price: book[0].parse().unwrap_or_default(),
+                                size: book[1].parse().unwrap_or_default(),
                             });
                         }
                         for book in get_orderboards.b {
                             b.push(Book {
-                                price: book[0].parse().unwrap(),
-                                size: book[1].parse().unwrap(),
+                                price: book[0].parse().unwrap_or_default(),
+                                size: book[1].parse().unwrap_or_default(),
                             });
                         }
 
@@ -453,20 +453,17 @@ pub async fn instruments(category: String) -> Result<Vec<Instrument>, String> {
 
     let list: Vec<InstrumentInfo> = serde_json::from_value(res.result.list).unwrap();
 
-    let mut instruments = vec![];
-    for info in list {
-        let instrument = Instrument {
-            symbol: info.symbol,
+    Ok(list
+        .iter()
+        .map(|item| Instrument {
+            symbol: item.symbol.clone(),
             ltp: 0.0,
             volume24h: 0.0,
-            price_tick: info.price_filter.tick_size.parse().unwrap(),
-            size_tick: info.lot_size_filter.qty_step.parse().unwrap(),
-            size_min: info.lot_size_filter.min_order_qty.parse().unwrap(),
-        };
-        instruments.push(instrument);
-    }
-
-    Ok(instruments)
+            price_tick: item.price_filter.tick_size.parse().unwrap(),
+            size_tick: item.lot_size_filter.qty_step.parse().unwrap(),
+            size_min: item.lot_size_filter.min_order_qty.parse().unwrap(),
+        })
+        .collect())
 }
 
 pub async fn ticker(category: String, symbol: String) -> Result<Ticker, String> {
@@ -487,14 +484,24 @@ pub async fn ticker(category: String, symbol: String) -> Result<Ticker, String> 
         return Err(res.ret_msg);
     }
 
-    let tickers = serde_json::from_value::<Vec<TickerInfo>>(res.result.list).unwrap();
-    let target_ticker = tickers.iter().find(|t| t.symbol == symbol).unwrap();
+    let tickers = match serde_json::from_value::<Vec<TickerInfo>>(res.result.list) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(e.to_string());
+        }
+    };
+    let target_ticker = match tickers.iter().find(|t| t.symbol == symbol) {
+        Some(v) => v,
+        None => {
+            return Err(format!("ticker is not match for {}", symbol).to_string());
+        }
+    };
     let ticker = Ticker {
         symbol: target_ticker.symbol.clone(),
-        ltp: target_ticker.last_price.parse().unwrap(),
-        volume24h: target_ticker.volume_24h.parse().unwrap(),
-        best_ask: target_ticker.ask1_price.parse().unwrap(),
-        best_bid: target_ticker.bid1_price.parse().unwrap(),
+        ltp: target_ticker.last_price.parse().unwrap_or_default(),
+        volume24h: target_ticker.volume_24h.parse().unwrap_or_default(),
+        best_ask: target_ticker.ask1_price.parse().unwrap_or_default(),
+        best_bid: target_ticker.bid1_price.parse().unwrap_or_default(),
     };
 
     Ok(ticker)
