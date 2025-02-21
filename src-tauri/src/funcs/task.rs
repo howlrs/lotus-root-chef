@@ -11,7 +11,6 @@ use crate::funcs::client::{Controller, Log, Logger};
 use crate::target::exchanges::models::{
     BookSide, DataType, Orderboard, Position, Ticker, ToExchange,
 };
-
 pub async fn runner(
     controller: Arc<RwLock<Controller>>,
     logger: Arc<RwLock<Logger>>,
