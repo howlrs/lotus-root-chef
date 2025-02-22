@@ -65,8 +65,7 @@ pub async fn runner(
     let (tx_rest_position, _) = broadcast::channel::<Vec<Position>>(32);
 
     //更新データ群
-    // - 内部使用データ
-    let board = Arc::new(RwLock::new(board::book::Orderboard::new()));
+    // - スレッド間共有使用データ
     let order_manage = Arc::new(Mutex::new(order_config.to_order_info()));
     // 更新データ群
     // - 外部データ
@@ -111,37 +110,35 @@ pub async fn runner(
         }
     }));
 
-    let (cloned_board, cloned_order_manage, cloned_board_config, cloned_logger) = {
-        (board.clone(), order_manage.clone(),  board_config.clone(), logger.clone())
+    let ( cloned_order_manage, cloned_board_config, cloned_logger) = {
+        ( order_manage.clone(),  board_config.clone(), logger.clone())
     };
     handles.push(spawn(async move {
+        let board = Arc::new(board::book::Orderboard::new());
         // WebSocketの送信
         loop {
             tokio::select! {
                 Some(books) = rx_ws_orderboard.recv() => {
-                    let mut update_board = cloned_board.write().await;
                     // Orderboardの更新
                     match books.data_type {
                         DataType::Snapshot => {
                             // Arc, Lockの粒度は親とする
                             // 板を差し替える
-                            update_board.replace(BookSide::Bid, books.b);
-                            update_board.replace(BookSide::Ask, books.a);
+                            board.replace(BookSide::Bid, books.b);
+                            board.replace(BookSide::Ask, books.a);
                         }
                         DataType::UpdateDelta => {
                             // size: 0の場合は削除
                             // 同priceは上書き
-                            update_board.update_delta(BookSide::Bid, books.b);
-                            update_board.update_delta(BookSide::Ask, books.a);
+                            board.update_delta(BookSide::Bid, books.b);
+                            board.update_delta(BookSide::Ask, books.a);
                         }
                     }
-
-                    update_board.update_at();
 
                     // env_logger traceであれば表示
                     if log_enabled!(log::Level::Info)  {
                         let (best_ask, best_bid) = {
-                            update_board.best_prices()
+                            board.best_prices()
                         };
 
                         info!("mid: {}", (best_ask + best_bid)/ 2.0);
@@ -157,7 +154,7 @@ pub async fn runner(
                             let r = cloned_order_manage.lock().await;
                             r.price
                         };
-                        update_board.target_book(&cloned_board_config, prev_order_price)
+                        board.target_book(&cloned_board_config, prev_order_price)
                     };
                     info!("search target price elapsed: {:?}", start.elapsed());
 
