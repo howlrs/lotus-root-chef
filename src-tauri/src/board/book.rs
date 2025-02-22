@@ -207,7 +207,7 @@ impl Orderboard {
                 for (price, book) in abook.iter() {
                     if is_condition(&(price, book)) {
                         // キーと値が整合しているかチェック
-                        if book.is_same(price.0) && !book.is_zero(price.0) {
+                        if book.is_same(price.0) && !book.is_zero() {
                             return (price.0, true);
                         } else {
                             return (0.0, false);
@@ -222,7 +222,7 @@ impl Orderboard {
                 // Bid は昇順になっているため、逆方向から探す
                 for (price, book) in bbook.iter().rev() {
                     if is_condition(&(price, book)) {
-                        if book.is_same(price.0) && !book.is_zero(price.0) {
+                        if book.is_same(price.0) && !book.is_zero() {
                             return (price.0, true);
                         } else {
                             return (0.0, false);
@@ -251,7 +251,7 @@ impl Book {
         self.size.is_nan() || self.size == 0.0
     }
 
-    fn is_zero(&self, key_price: f64) -> bool {
+    fn is_zero(&self) -> bool {
         self.size == 0.0 || self.price == 0.0
     }
 
