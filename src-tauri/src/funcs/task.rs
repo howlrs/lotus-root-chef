@@ -40,6 +40,7 @@ pub async fn runner(
         )
     };
 
+    // 各対応取引所のクライアントを内包する汎化取引所クライアントを生成
     let exchange_client = ToExchange::create_client(&exchange_config, target_symbol.clone());
 
     // 直列に実行するためのチャネル
@@ -64,11 +65,12 @@ pub async fn runner(
     let (tx_rest_orderboard, _) = broadcast::channel::<Orderboard>(32);
     let (tx_rest_position, _) = broadcast::channel::<Vec<Position>>(32);
 
-    //更新データ群
+    // 共有更新データ群
     // - スレッド間共有使用データ
     let order_manage = Arc::new(Mutex::new(order_config.to_order_info()));
-    // 更新データ群
-    // - 外部データ
+
+    // 共有更新データ群
+    // - 外部データ: 更新スレッド外で値が必要になり次第取得する
     let ticker = Arc::new(RwLock::new(Ticker::default()));
     let positions = Arc::new(RwLock::new(vec![]));
 
