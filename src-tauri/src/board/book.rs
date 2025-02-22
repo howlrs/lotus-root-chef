@@ -262,103 +262,192 @@ impl Book {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
+    use rand::Rng;
+
     use super::*;
 
-    #[test]
-    fn test_target_book_ask_without_prev_exclusion() {
-        // 検索対象価格の設定
-        let price_min = 1;
-        let target_price = 99;
-        // 見つかった価格を自分の指値として除外する
-        let execuded_price = Some(99.0);
-        // 期待する値
-        let is_expected = false;
-        let expected_price = 0.0;
-        let expected_best_ask = 1.0;
+    // 参考: 10000個の板を生成し、検索対象価格を設定し、最小値から検索する
+    // create board time: 18.5503ms
+    // filterd time: 11.8µs
 
-        // 対象データの生成
+    fn setup_board(
+        price_min: usize,
+        price_max: usize,
+        target_price: usize,
+        side: BookSide,
+    ) -> Orderboard {
         let board = Orderboard::new();
-        // 価格が [1.0, 2.0, ..., 100.0] の等差数列で100個のブックを生成します。
         let mut books = Vec::new();
-        for i in price_min..=100 {
-            // すべてのブックはサイズが1.0で、is_largeの条件を満たしています。
-            // 99の倍数のブックのサイズは1.5です。
-            // 検索対象を1.0に設定します。
-            let size = if i % target_price as usize == 0 {
-                1.5
-            } else {
-                1.0
-            };
+        for i in price_min..=price_max {
+            let size = if i % target_price == 0 { 1.5 } else { 1.0 };
             books.push(Book::new(size, i as f64));
         }
-        board.replace_ask(books);
+        match side {
+            BookSide::Ask => board.replace_ask(books),
+            BookSide::Bid => board.replace_bid(books),
+        }
+        board
+    }
 
-        // Askサイドのテスト設定を作成します。価格範囲は[1.0, 150.0]、最小サイズは1.0です。
-        let config = Config {
-            side: BookSide::Ask,
-            // 価格範囲
-            hight: 150.0,
-            low: 1.0,
-            // 検索対象サイズ
+    fn create_config(side: BookSide, price_max: usize, price_min: usize) -> Config {
+        Config {
+            side,
+            hight: price_max as f64,
+            low: price_min as f64,
             size: 1.0,
-        };
+        }
+    }
 
-        // 前回の自身の注文価格は提供されていません。
-        let (price, is_found) = board.target_book(&config, execuded_price);
-        // Askの場合、最も低い有効な価格が選択されるはずです: 1.0。
-        assert_eq!(is_found, is_expected);
-        assert_eq!(price, expected_price);
+    #[test]
+    fn test_target_book_ask() {
+        let price_max = 10000;
+        let price_min = 1;
 
+        let wall_price = rand::rng().random_range(7..price_max - 1);
+        let excluded_price = None;
+
+        let expected_is_found = true;
+        let expected_price = wall_price as f64;
+        let expected_best_ask = 1.0;
+
+        let board = setup_board(price_min, price_max, wall_price, BookSide::Ask);
+        let config = create_config(BookSide::Ask, price_max + 1, price_min - 1);
+
+        let (price, is_found) = board.target_book(&config, excluded_price);
+        assert_eq!(
+            is_found, expected_is_found,
+            "price: {}, expected: {}",
+            price, expected_price,
+        );
+        // 最良価格の取得
+        // 板生成時の最小値となる
+        let best_ask = board.best(BookSide::Ask);
+        assert_eq!(
+            price, expected_price,
+            "wall_price: {}, best_ask: {}",
+            wall_price, best_ask
+        );
+        assert_eq!(best_ask, expected_best_ask);
+    }
+
+    #[test]
+    fn test_target_book_bid() {
+        let price_max = 10000;
+        let price_min = 1;
+
+        // max値を最大に乱数を生成
+        let wall_price = rand::rng().random_range(7..price_max - 1);
+        let excluded_price = None;
+
+        let expected_is_found = true;
+        let expected_price = (price_max / wall_price * wall_price) as f64;
+        let expected_best_bid = price_max as f64;
+
+        let board = setup_board(price_min, price_max, wall_price, BookSide::Bid);
+        let config = create_config(BookSide::Bid, price_max + 1, price_min - 1);
+
+        let (price, is_found) = board.target_book(&config, excluded_price);
+        assert_eq!(
+            is_found, expected_is_found,
+            "price: {}, expected: {}",
+            price, expected_price,
+        );
+        // 最良価格の取得
+        // 板生成時の最大値となる
+        let best_bid = board.best(BookSide::Bid);
+        let binding = board.bid();
+        let book = binding.get_key_value(&OrderedFloat(best_bid)).unwrap().1;
+        assert_eq!(
+            price, expected_price,
+            "wall_price: {}, best_bid: {}, book: {:?}",
+            wall_price, best_bid, book
+        );
+        assert_eq!(price % wall_price as f64, 0.0);
+        assert_eq!(best_bid, expected_best_bid);
+    }
+
+    #[test]
+    fn test_target_book_ask_with_prev_exclusion() {
+        let price_max = 10000;
+        let price_min = 1;
+
+        // 小さい乱数を生成
+        let divis = rand::rng().random_range(7..99);
+        let wall_price = divis;
+        let min_wall_price = divis;
+        let excluded_price = Some(min_wall_price as f64);
+
+        let expected_is_found = true;
+        let expected_price = (min_wall_price * 2) as f64;
+        let expected_best_ask = price_min as f64;
+
+        let board = setup_board(price_min, price_max, wall_price, BookSide::Ask);
+        let config = create_config(BookSide::Ask, price_max + 1, price_min - 1);
+
+        let (price, is_found) = board.target_book(&config, excluded_price);
+        assert_eq!(
+            is_found, expected_is_found,
+            "price: {}, expected: {}",
+            price, expected_price,
+        );
+        assert_eq!(price, expected_price, "wall_price: {}", wall_price);
+        assert_eq!(price % wall_price as f64, 0.0);
+
+        // 最良価格の取得
+        // 板生成時の最小値となる
         let best_ask = board.best(BookSide::Ask);
         assert_eq!(best_ask, expected_best_ask);
     }
 
     #[test]
     fn test_target_book_bid_with_prev_exclusion() {
-        // 検索対象価格の設定
-        let price_max = 100;
-        let target_price = 71;
-        // 見つかった価格を自分の指値として除外する
-        let execuded_price = None;
-        // 期待する値
-        let is_expected = true;
-        let expected_price = 71.0;
-        let expected_best_bid = 100.0;
+        let price_max = 10000;
+        let price_min = 1;
 
-        // 対象データの生成
-        let board = Orderboard::new();
-        // 価格が [1.0, 2.0, ..., 100.0] の等差数列で100個のブックを生成します。
-        let mut books = Vec::new();
-        for i in 1..=price_max {
-            // すべてのブックはサイズが1.0で、is_largeの条件を満たしています。
-            // 99の倍数のブックのサイズは1.5です。
-            // 検索対象を1.0に設定します。
-            let size = if i % target_price as usize == 0 {
-                1.5
-            } else {
-                1.0
-            };
-            books.push(Book::new(size, i as f64));
-        }
-        board.replace_bid(books);
+        // 小さい乱数を生成
+        let divis = rand::rng().random_range(7..99);
+        let wall_price = divis;
+        let max_wall_price = price_max / divis * divis;
+        let excluded_price = Some(max_wall_price as f64);
 
-        // Askサイドのテスト設定を作成します。価格範囲は[1.0, 150.0]、最小サイズは1.0です。
-        let config = Config {
-            side: BookSide::Bid,
-            // 価格範囲
-            hight: 150.0,
-            low: 1.0,
-            // 検索対象サイズ
-            size: 1.0,
-        };
+        let expected_is_found = true;
+        let expected_price = (max_wall_price - divis) as f64;
+        let expected_best_bid = price_max as f64;
 
-        // 前回の自身の注文価格は提供されていません。
-        let (price, is_found) = board.target_book(&config, execuded_price);
-        // Askの場合、最も低い有効な価格が選択されるはずです: 1.0。
-        assert_eq!(is_found, is_expected);
-        assert_eq!(price, expected_price);
+        let board = setup_board(price_min, price_max, wall_price, BookSide::Bid);
+        let config = create_config(BookSide::Bid, price_max + 1, price_min - 1);
 
+        let (price, is_found) = board.target_book(&config, excluded_price);
+        assert_eq!(
+            is_found, expected_is_found,
+            "price: {}, expected: {}",
+            price, expected_price,
+        );
+        assert_eq!(price, expected_price, "wall_price: {}", wall_price);
+        assert_eq!(price % wall_price as f64, 0.0);
+
+        // 最良価格の取得
+        // 板生成時の最大値となる
         let best_bid = board.best(BookSide::Bid);
         assert_eq!(best_bid, expected_best_bid);
+    }
+
+    #[test]
+    fn n_count_try() {
+        let start = Instant::now();
+        let count = 1000;
+        for _ in 0..count {
+            test_target_book_ask();
+            test_target_book_bid();
+            test_target_book_ask_with_prev_exclusion();
+            test_target_book_bid_with_prev_exclusion();
+        }
+
+        println!("{} times: {}ms", count, start.elapsed().as_millis());
+        // 10 times: 555ms
+        // 100 times: 5573ms
+        // 1000 times: 57298ms
     }
 }
